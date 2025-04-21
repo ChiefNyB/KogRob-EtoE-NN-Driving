@@ -31,7 +31,7 @@ setup(
     maintainer='barney',
     maintainer_email='105289927+ChiefNyB@users.noreply.github.com',
     description='Package for training and running an End-to-End CNN for driving.',
-    license='TODO: License declaration', # Please add a license (e.g., Apache 2.0, MIT)
+    license='Apache 2.0',
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
