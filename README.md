@@ -28,6 +28,8 @@ Don't forget to source the setup:
 source ~/ros2_project/install/setup.bash
 ```
 
+For GPU acceleration CUDA and cuDNN Library are required.
+
 
 
 ## 2. Error handling

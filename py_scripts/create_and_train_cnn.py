@@ -3,11 +3,8 @@ from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Activation, Flatten, Dense, Conv2D, MaxPooling2D, Input, Dropout, LayerNormalization
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.optimizers.schedules import ExponentialDecay
 from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
 from tensorflow.keras import __version__ as keras_version
-from tensorflow.compat.v1 import ConfigProto
-from tensorflow.compat.v1 import InteractiveSession
 from tensorflow.keras.models import load_model
 from tensorflow.random import set_seed
 import tensorflow as tf
@@ -34,6 +31,23 @@ print("Tensorflow version: %s" % tf.__version__)
 keras_version = str(keras_version).encode('utf8')
 print("Keras version: %s" % keras_version)
 
+# --- Check for GPU availability ---
+print("[INFO] Checking for GPU...")
+gpus = tf.config.list_physical_devices('GPU')
+if gpus:
+  try:
+    # Currently, memory growth needs to be the same across GPUs
+    for gpu in gpus:
+      tf.config.experimental.set_memory_growth(gpu, True)
+    logical_gpus = tf.config.list_logical_devices('GPU')
+    print(f"[INFO] {len(gpus)} Physical GPUs, {len(logical_gpus)} Logical GPUs found and configured.")
+  except RuntimeError as e:
+    # Memory growth must be set before GPUs have been initialized
+    print(f"[WARNING] Could not set memory growth: {e}")
+    print("[INFO] GPUs found, but memory growth configuration failed (might be okay).")
+else:
+    print("[INFO] No GPU found. Training will fall back to CPU.")
+# ---------------------------------
 
 
 ############ CNN construction ############
@@ -119,11 +133,14 @@ imagePaths = sorted(list(paths.list_images(dataset)))
 random.shuffle(imagePaths)
 
 # loop over the input images
+processed_count = 0
+skipped_count = 0
 for imagePath in imagePaths:
     # load the image, pre-process it, and store it in the data list
     image = cv2.imread(imagePath)
     if image is None:
         print(f"[WARNING] Could not read image: {imagePath}. Skipping.")
+        skipped_count += 1
         continue
 
     # Resize image - cv2.resize expects (width, height) -> (200, 66)
@@ -131,10 +148,11 @@ for imagePath in imagePaths:
         image = cv2.resize(image, (image_size["width"], image_size["height"]))
     except Exception as e:
         print(f"[ERROR] Could not resize image: {imagePath}. Error: {e}. Skipping.")
+        skipped_count += 1
         continue
 
     image = img_to_array(image) # Converts to numpy array (H, W, C) and dtype=float32 -> (66, 200, 3)
-    data.append(image)
+
 
     # Extract the filename from the path
     filename = os.path.basename(imagePath)
@@ -153,34 +171,49 @@ for imagePath in imagePaths:
             elif part.startswith('Y') and len(part) > 1:
                 y_val = float(part[1:]) # Get the value after 'Y'
 
-        # Check if both values were found
+        # Check if both values were found and are valid numbers
         if x_val is not None and y_val is not None:
             label = [x_val, y_val]
             labels.append(label)
+            data.append(image) # Append image only if label is valid
+            processed_count += 1
             # Optional: print progress less frequently for large datasets
-            # if len(labels) % 100 == 0:
-            #    print(f"Processed {len(labels)} images...")
+            if processed_count % 500 == 0:
+               print(f"Processed {processed_count} images...")
         else:
-            raise ValueError("X or Y value not found in filename parts")
+            # Raise error only if parsing seemed possible but failed, otherwise just warn
+             print(f"[WARNING] Could not parse valid X/Y values from filename: {filename}. Skipping image.")
+             skipped_count += 1
+             continue # Skip to the next image
 
-    except (ValueError, IndexError, TypeError) as e:
-        print(f"[WARNING] Could not parse X/Y values from filename: {filename}. Error: {e}. Skipping image.")
-        # Remove the corresponding image data if label parsing failed
-        data.pop() # Remove the image added just before the try block
+    except Exception as e: # Catch broader exceptions during parsing logic
+        print(f"[ERROR] Unexpected error parsing filename: {filename}. Error: {e}. Skipping image.")
+        skipped_count += 1
         continue # Skip to the next image
+
+print(f"[INFO] Finished loading data. Processed: {processed_count}, Skipped: {skipped_count}")
+
+if not data:
+    print("[ERROR] No data loaded. Exiting.")
+    exit()
 
 # --- Convert lists to NumPy arrays ---
 # Scale the raw pixel intensities to the range [0, 1]
-data = np.array(data, dtype="float32") / 255.0
+# Perform scaling *after* splitting to prevent data leakage from test set statistics (though simple /255 is less sensitive)
+data = np.array(data, dtype="float32")
 labels = np.array(labels, dtype="float32")
-
-
 
 # --- Split data ---
 # partition the data into training and testing splits using 75% of
 # the data for training and the remaining 25% for testing
 (trainX, testX, trainY, testY) = train_test_split(data, labels,
     test_size=0.25, random_state=42) # Use the same random_state for reproducibility
+
+# --- Scale data after splitting ---
+trainX = trainX / 255.0
+testX = testX / 255.0
+
+print(f"[INFO] Data split complete. Training samples: {len(trainX)}, Test samples: {len(testX)}")
 
 
 
@@ -199,13 +232,16 @@ model = build_CNN(width=image_size["width"], height=image_size["height"], depth=
 
 # Compile the model for regression
 opt = Adam(learning_rate=LEARNING_RATE)
+# Using Mean Squared Error loss, add Mean Absolute Error for interpretability
 model.compile(loss="mse", optimizer=opt, metrics=["mae", "mse"])
 
 # Print model summary
 model.summary()
 
 # Reduce learning rate when a metric has stopped improving
+# Monitor 'val_loss' which is generally preferred over training loss
 lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
+
 # Save the best model based on validation loss
 checkpoint_filepath = "..//network_model//best_model.keras"
 checkpoint = ModelCheckpoint(checkpoint_filepath, monitor='val_loss', save_best_only=True, verbose=1)
@@ -214,16 +250,46 @@ checkpoint = ModelCheckpoint(checkpoint_filepath, monitor='val_loss', save_best_
 callbacks_list=[lr_scheduler, checkpoint]
 
 print("[INFO] training network...")
-H = model.fit(trainX, trainY, validation_data=(testX, testY),
+# Ensure data types are correct (TensorFlow prefers float32)
+H = model.fit(trainX.astype('float32'), trainY.astype('float32'),
+              validation_data=(testX.astype('float32'), testY.astype('float32')),
               batch_size=BATCH_SIZE, epochs=EPOCHS, verbose=1,
               callbacks=callbacks_list)
 
-model.save("..//network_model//last_model.keras")
+# Save the model after the last epoch
+last_model_filepath = "..//network_model//last_model.keras"
+model.save(last_model_filepath)
+print(f"[INFO] Last model saved to {last_model_filepath}")
+print(f"[INFO] Best model saved to {checkpoint_filepath} (based on val_loss)")
 
-print("[INFO] evaluating network...")
-model = load_model("..//network_model//best_model.keras")
+
+print("[INFO] evaluating network using the best saved model...")
+# Check if the best model file exists before loading
+if os.path.exists(checkpoint_filepath):
+    try:
+        model = load_model(checkpoint_filepath)
+        print(f"[INFO] Successfully loaded best model from {checkpoint_filepath}")
+
+        predictions = model.predict(testX, batch_size=BATCH_SIZE)
+        eval_results = model.evaluate(testX, testY, batch_size=BATCH_SIZE, verbose=0)
+        print(f"[INFO] Evaluation on test set (Best Model) - Loss: {eval_results[0]:.4f}, MAE: {eval_results[1]:.4f}, MSE: {eval_results[2]:.4f}")
+
+        # Plotting should ideally happen only if evaluation succeeded
+        print("[INFO] plotting training history...")
+        # ... (plotting code) ...
+
+    except Exception as e:
+        print(f"[ERROR] Failed to load or evaluate the best model from {checkpoint_filepath}. Error: {e}")
+else:
+    print(f"[WARNING] Best model file not found at {checkpoint_filepath}. Skipping evaluation and plotting.")
+
+print(f"[INFO] Successfully loaded best model from {checkpoint_filepath}")
 
 predictions = model.predict(testX, batch_size=BATCH_SIZE)
+# You might want to calculate and print evaluation metrics here
+eval_results = model.evaluate(testX, testY, batch_size=BATCH_SIZE, verbose=0)
+print(f"[INFO] Evaluation on test set (Best Model) - Loss: {eval_results[0]:.4f}, MAE: {eval_results[1]:.4f}, MSE: {eval_results[2]:.4f}")
+
 
 print("[INFO] plotting training history...")
 plt.style.use("ggplot")
@@ -236,7 +302,7 @@ plt.plot(np.arange(0, N), H.history["val_mae"], label="val_mae")
 plt.title("Training Loss and MAE (200x66 Input)")
 plt.xlabel("Epoch #")
 plt.ylabel("Loss/MAE")
-plt.legend(loc="lower left")
+plt.legend(loc="best")
 plt.show()
 
 
