@@ -40,7 +40,7 @@ print("Keras version: %s" % keras_version)
 
 
 # Model structure taken from: https://developer.nvidia.com/blog/deep-learning-self-driving-cars/
-def build_CNN(width, height, depth, activation='relu', dropout=0.0):
+def build_CNN(width, height, depth, activation='relu', dropout=0.25):
 
     # initialize the model
     model = Sequential()
