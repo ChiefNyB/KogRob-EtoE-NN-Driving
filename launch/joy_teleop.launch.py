@@ -11,6 +11,12 @@ def generate_launch_description():
 
     return LaunchDescription([
         Node(
+            package='KogRob-EtoE-NN-Driving',
+            executable='joy_xy_republisher',
+            name='joy_xy_republisher',
+            output='screen'
+        ),
+        Node(
             package='teleop_twist_joy',
             executable='teleop_node',
             name='teleop_twist_joy_node',
