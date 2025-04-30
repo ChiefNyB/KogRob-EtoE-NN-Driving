@@ -11,7 +11,11 @@ You can add these with cloning the following repos into the src folder:
 ```bash
 git clone -b mogi-ros2 https://github.com/MOGI-ROS/turtlebot3
 ```
-
+Install the following packages using apt:
+```bash
+sudo apt install ros-jazzy-joy
+sudo apt install ros-jazzy-teleop-twist-joy
+```
 Don't forget to source the setup:
 
 ```bash
