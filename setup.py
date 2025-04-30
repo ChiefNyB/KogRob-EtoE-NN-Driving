@@ -36,6 +36,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            "joy_republisher = py_scripts.joy_republisher:main"
         ],
     },
 )

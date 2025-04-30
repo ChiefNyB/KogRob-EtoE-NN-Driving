@@ -23,5 +23,11 @@ def generate_launch_description():
             name='teleop_twist_joy_node',
             parameters=[config],
             output='screen'
+        ),
+        Node(
+            package='KogRob-EtoE-NN-Driving',
+            executable='joy_republisher',
+            name='joy_republisher',
+            output='screen'
         )
     ])
