@@ -33,3 +33,10 @@ Try installing it by running the command:
 ```bash
 pip install catkin_pkg
 ```
+
+# Control
+Manual control with joystick using the launch file:
+```bash
+ros2 launch KogRob-EtoE-NN-Driving joy_teleop_manual.launch.py
+```
+You can configure the joystick teleop in config/teleop_joy.yaml

@@ -15,6 +15,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         # Example: Include launch files if you have them
         (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*launch.[pxy][yma]*'))),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml'))
     ],
     # Python requires
     install_requires=[
