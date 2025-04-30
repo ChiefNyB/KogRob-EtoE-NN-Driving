@@ -35,6 +35,7 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            f'train_cnn = {package_name}.{submodule_name}.create_and_train_cnn:main',
         ],
     },
 )
