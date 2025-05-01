@@ -10,7 +10,7 @@ Dependencies (beyond ROS2 and Gazebo):
 - Some python packages (installed automaically, see later)
 - ROS2 joystick interface package
 
-You can add these with cloning the following repo into the src folder:
+You can add these with cloning the following repo into the src folder of the workspace:
 
 ```bash
 git clone -b mogi-ros2 https://github.com/MOGI-ROS/turtlebot3
@@ -39,6 +39,8 @@ source ~/ros2_project/install/setup.bash
 ```
 
 For GPU acceleratied training process CUDA and cuDNN Library are required (optional).
+
+Finally, after installing all dependencies, run the ```colcon build``` commnad in the root of the workspace.
 
 
 ## 2. How to use
