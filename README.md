@@ -7,19 +7,22 @@ Based on ROS2 Jazzy and Gazebo Harmonic.
 Dependencies (beyond ROS2 and Gazebo):
 - MOGI turtlebot3 repository
 - Python3
-- Python packages
+- Some python packages (installed automaically, see later)
+- ROS2 joystick interface package
 
 You can add these with cloning the following repo into the src folder:
 
 ```bash
 git clone -b mogi-ros2 https://github.com/MOGI-ROS/turtlebot3
 ```
-Install the following packages using apt:
+And installing the packages below using apt:
 ```bash
 sudo apt install ros-jazzy-joy
 sudo apt install ros-jazzy-teleop-twist-joy
 sudo apt install python3-pip
 sudo apt install pipx
+sudo apt install ros-jazzy-joy
+sudo apt install ros-jazzy-teleop-twist-joy
 ```
 
 Set up a Python virtual enviroment, as described [here](https://github.com/MOGI-ROS/Week-1-8-Cognitive-robotics?tab=readme-ov-file#line-following). 
@@ -41,8 +44,7 @@ For GPU acceleratied training process CUDA and cuDNN Library are required (optio
 ## 2. How to use
 
 ### Controller
-
-Manual control with joystick using the launch file:
+Manual control with joystick can be started using the launch file:
 ```bash
 ros2 launch KogRob-EtoE-NN-Driving joy_teleop_manual.launch.py
 ```
