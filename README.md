@@ -55,15 +55,20 @@ You can configure the joystick teleop in config/teleop_joy.yaml
 ### Labelled data acquisition
 ...
 
-Finally, the training images are saved under the ../labelled_data folder.
+Finally, the training images are saved under the folder```../labelled_data``` with a name similar to this: ```..._X0.5_Y0.86.png```
+Here the number after ```X``` represents the normalized linear (forward-backward) speed, while the number after ```Y``` denotes the normalized angular (left-right) speed.
 
 ### Neural network creation and teaching
-If a correctly labelled training dataset exists in the directory mentioned above, the CNN can be created and trained, by navigating to the ```py_scripts``` directory and running the following command:
+The origin of the CNN model is NVIDIA's [DAVE-2]{https://developer.nvidia.com/blog/deep-learning-self-driving-cars/}, with the slight modification of outputting linear and angular speed, instead of giving only the reciprical of the turning radius.
+The network has an input of 200x66 pixels and X and Y outputs.
+
+If a correctly labelled training dataset exists in the directory mentioned above, the CNN can be created and trained by navigating to the ```py_scripts``` directory and running the script:
 
 ```bash
 python3 create_and_train_cnn.py
 ```
-The process can be followed in the terminal, and in case an error happens it is also printed here.
+The process can be monitored in the terminal, and in case an error happens it is also printed here.
+After a completed training procedure, the test evalution graphs pop-up showing the values of testfitting.
 
 ### Applying the trained neural network
 
