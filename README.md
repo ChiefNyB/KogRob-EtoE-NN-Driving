@@ -5,7 +5,7 @@ Based on ROS2 Jazzy and Gazebo Harmonic.
 ## 1. Install and setup
 
 Dependencies (beyond ROS2 and Gazebo):
-- MOGI turtlebot3 repository
+- MOGI turtlebot3 repositories
 - Python3
 - Some python packages (installed automaically, see later)
 - ROS2 joystick interface package
@@ -14,11 +14,10 @@ You can add these with cloning the following repo into the src folder of the wor
 
 ```bash
 git clone -b mogi-ros2 https://github.com/MOGI-ROS/turtlebot3
+git clone -b new_gazebo https://github.com/MOGI-ROS/turtlebot3_simulations
 ```
 And installing the packages below using apt:
 ```bash
-sudo apt install ros-jazzy-joy
-sudo apt install ros-jazzy-teleop-twist-joy
 sudo apt install python3-pip
 sudo apt install pipx
 sudo apt install ros-jazzy-joy
@@ -46,11 +45,20 @@ Finally, after installing all dependencies, run the ```colcon build``` commnad i
 ## 2. How to use
 
 ### Controller
-Manual control with joystick can be started using the launch file:
+Manual control of the turtlebot with joystick can be started using the launch file:
 ```bash
 ros2 launch KogRob-EtoE-NN-Driving joy_teleop_manual.launch.py
 ```
-You can configure the joystick teleop in config/teleop_joy.yaml
+This converts the /joy topic of the controller into twist messages in the /cmd_vel topic, so it can drive the robot. It also publishes a simple version of the /joy topic, called /joy_xy. This topic only contains a list of the x and y coordinates of the joystick. The range of the coordinates is from -1.0 to 1.0. The /joy_xy topic makes it easier to communicate with the neural network. Publishing this topic when manually driving helps with labeling in the teaching process.\
+You can also drive the robot straight from the /joy_xy topic with the launch file:
+```bash
+ros2 launch KogRob-EtoE-NN-Driving joy_teleop.launch.py
+```
+This launch file converts the coordinates in the topic to joy and the twist values and publishes it in /cmd_vel. You can also configure both the joystick teleops in ```config/teleop_joy.yaml```. This file configures mainly the speed of the robot and the joystick selection.\
+You can test the control of the robot with the prepared worlds in the ```turtlebot3_gazebo``` package from the ```turtlebot3_simulations``` repository. An example of a test world and the turtlebot3:
+```bash
+ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
+```
 
 ### Labelled data acquisition
 ...
