@@ -17,6 +17,8 @@ git clone -b mogi-ros2 https://github.com/MOGI-ROS/turtlebot3
 ```
 And installing the packages below using apt:
 ```bash
+sudo apt install ros-jazzy-joy
+sudo apt install ros-jazzy-teleop-twist-joy
 sudo apt install python3-pip
 sudo apt install pipx
 sudo apt install ros-jazzy-joy
@@ -78,7 +80,3 @@ Try installing it by running the command:
 ```bash
 pip install catkin_pkg
 ```
-
-
-
-

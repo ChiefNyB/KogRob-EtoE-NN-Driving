@@ -15,6 +15,7 @@ setup(
         ('share/' + package_name, ['package.xml']),
         # Example: Include launch files if you have them
         (os.path.join('share', package_name, 'launch'), glob(os.path.join('launch', '*launch.[pxy][yma]*'))),
+        (os.path.join('share', package_name, 'config'), glob('config/*.yaml'))
     ],
     # Python requires
     install_requires=[
@@ -35,6 +36,9 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
+            "joy_republisher = py_scripts.joy_republisher:main",
+            "joy_xy_republisher = py_scripts.joy_xy_republisher:main",
+            "joy_xy_publisher = py_scripts.joy_xy_publisher:main"
         ],
     },
 )
