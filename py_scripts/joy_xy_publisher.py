@@ -15,7 +15,7 @@ class JoyxyPublisher(Node):
 
     def publish_joy_xy(self):
         msg = Float32MultiArray()
-        msg.data = [0.5, 0.5]
+        msg.data = [0.5, 0.7]
         self.publisher_.publish(msg)
     
 

@@ -11,3 +11,13 @@ joy_node:
   ros__parameters:
     deadzone: 0.05
     autorepeat_rate: 20.0
+  
+joy_republisher:
+  ros__parameters:
+    axis_linear.x: 1 #lefty
+    axis_angular.yaw: 0 #leftx
+
+joy_xy_republisher:
+  ros__parameters:
+    axis_linear.x: 1 #lefty
+    axis_angular.yaw: 0 #leftx

@@ -28,6 +28,7 @@ def generate_launch_description():
             package='KogRob-EtoE-NN-Driving',
             executable='joy_republisher',
             name='joy_republisher',
+            parameters=[config],
             output='screen'
         )
     ])
