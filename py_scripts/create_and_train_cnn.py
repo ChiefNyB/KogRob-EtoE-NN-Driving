@@ -122,15 +122,20 @@ def build_CNN(width, height, depth, activation='relu', dropout=0.25):
 
 ############# Training data preparation ############
 
-dataset = '..//labelled_data' # Consider using os.path.join for cross-platform compatibility
+
+dataset = os.path.join('..', 'labelled_data')
 # initialize the data and labels
 print("[INFO] loading images and labels...")
 data = []
 labels = [] # Will store lists of [x_val, y_val]
 
-# grab the image paths and randomly shuffle them
-imagePaths = sorted(list(paths.list_images(dataset)))
-random.shuffle(imagePaths)
+try:
+    # grab the image paths and randomly shuffle them
+    imagePaths = sorted(list(paths.list_images(dataset)))
+    random.shuffle(imagePaths)
+except:
+    print(f"[ERROR] Could not load images from {dataset}. Exiting.")
+    exit()
 
 # loop over the input images
 processed_count = 0
@@ -243,7 +248,7 @@ model.summary()
 lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
 
 # Save the best model based on validation loss
-checkpoint_filepath = "..//network_model//best_model.keras"
+checkpoint_filepath = os.path.join("..", "network_model", "best_model.keras")
 checkpoint = ModelCheckpoint(checkpoint_filepath, monitor='val_loss', save_best_only=True, verbose=1)
 
 # callbacks
@@ -257,7 +262,7 @@ H = model.fit(trainX.astype('float32'), trainY.astype('float32'),
               callbacks=callbacks_list)
 
 # Save the model after the last epoch
-last_model_filepath = "..//network_model//last_model.keras"
+last_model_filepath = os.path.join("..", "network_model", "last_model.keras")
 model.save(last_model_filepath)
 print(f"[INFO] Last model saved to {last_model_filepath}")
 print(f"[INFO] Best model saved to {checkpoint_filepath} (based on val_loss)")
@@ -276,34 +281,24 @@ if os.path.exists(checkpoint_filepath):
 
         # Plotting should ideally happen only if evaluation succeeded
         print("[INFO] plotting training history...")
-        # ... (plotting code) ...
+        plt.style.use("ggplot")
+        plt.figure()
+        N = EPOCHS
+        plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
+        plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
+        plt.plot(np.arange(0, N), H.history["mae"], label="train_mae")
+        plt.plot(np.arange(0, N), H.history["val_mae"], label="val_mae")
+        plt.title("Training Loss and MAE (200x66 Input)")
+        plt.xlabel("Epoch #")
+        plt.ylabel("Loss/MAE")
+        plt.legend(loc="best")
+        plt.show()
 
     except Exception as e:
         print(f"[ERROR] Failed to load or evaluate the best model from {checkpoint_filepath}. Error: {e}")
 else:
     print(f"[WARNING] Best model file not found at {checkpoint_filepath}. Skipping evaluation and plotting.")
 
-print(f"[INFO] Successfully loaded best model from {checkpoint_filepath}")
-
-predictions = model.predict(testX, batch_size=BATCH_SIZE)
-# You might want to calculate and print evaluation metrics here
-eval_results = model.evaluate(testX, testY, batch_size=BATCH_SIZE, verbose=0)
-print(f"[INFO] Evaluation on test set (Best Model) - Loss: {eval_results[0]:.4f}, MAE: {eval_results[1]:.4f}, MSE: {eval_results[2]:.4f}")
-
-
-print("[INFO] plotting training history...")
-plt.style.use("ggplot")
-plt.figure()
-N = EPOCHS
-plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
-plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
-plt.plot(np.arange(0, N), H.history["mae"], label="train_mae")
-plt.plot(np.arange(0, N), H.history["val_mae"], label="val_mae")
-plt.title("Training Loss and MAE (200x66 Input)")
-plt.xlabel("Epoch #")
-plt.ylabel("Loss/MAE")
-plt.legend(loc="best")
-plt.show()
 
 
 print("[INFO] Script finished.")
