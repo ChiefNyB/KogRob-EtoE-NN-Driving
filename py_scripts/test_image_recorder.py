@@ -12,6 +12,7 @@ import tty
 import termios
 from datetime import datetime
 import threading
+import concurrent.futures
 
 # Store original terminal settings
 original_terminal_settings = termios.tcgetattr(sys.stdin)
@@ -41,6 +42,9 @@ class ImageRecorderNode(Node):
         # Recording state variables
         self.is_recording = False
         self._recording_lock = threading.Lock() # Lock for thread-safe access to is_recording
+
+        # New thread pool executor for file writing
+        self.file_writer_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) # Only need 1 worker for sequential writes
 
         # Create output directory if it doesn't exist
         try:
@@ -79,6 +83,17 @@ class ImageRecorderNode(Node):
         self.keyboard_thread.daemon = True # Allows program to exit even if thread is running
         self.keyboard_thread.start()
 
+    def save_image_async(self, filepath, data):
+        """Function to be run in a separate thread for saving."""
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(data)
+            # self.get_logger().debug(f"Saved image: {os.path.basename(filepath)}") # Uncomment if needed
+        except IOError as e:
+            self.get_logger().error(f"Failed to save image {os.path.basename(filepath)}: {e}")
+        except Exception as e:
+            self.get_logger().error(f"An unexpected error occurred while saving image {os.path.basename(filepath)}: {e}")
+
     def synchronized_callback(self, image_msg: CompressedImage, cmd_vel_msg: Twist):
         """Callback function for processing synchronized image and cmd_vel messages."""
         with self._recording_lock:
@@ -115,15 +130,10 @@ class ImageRecorderNode(Node):
         filename = f"{timestamp}_LinX{lin_x_str}_AngZ{ang_z_str}.{extension}" # Updated filename format
         filepath = os.path.join(self.output_dir, filename)
 
-        # Save the image data
-        try:
-            with open(filepath, 'wb') as f:
-                f.write(image_msg.data)
-            # self.get_logger().debug(f"Saved image: {filename}") # Log if needed (can be verbose)
-        except IOError as e:
-            self.get_logger().error(f"Failed to save image {filename}: {e}")
-        except Exception as e:
-            self.get_logger().error(f"An unexpected error occurred while saving image: {e}")
+        # --- Submit the file writing task to the executor ---
+        image_data = image_msg.data # Copy data needed by the thread
+        self.file_writer_executor.submit(self.save_image_async, filepath, image_data)
+        # Callback returns quickly now
 
 
     def keyboard_listener(self):
@@ -131,21 +141,28 @@ class ImageRecorderNode(Node):
         # Set terminal to raw mode to capture single key presses
         tty.setraw(sys.stdin.fileno())
         print("\r", end="") # Clear potential prompt artifacts
+        # Print initial status without newline to allow overwriting
+        print(f"\rRecording {'STARTED' if self.is_recording else 'STOPPED'}. Press 'r' again to toggle, 'q' to quit.", end="")
+        sys.stdout.flush() # Ensure it's displayed immediately
 
         while rclpy.ok():
             # Use select for non-blocking check of stdin
             if select.select([sys.stdin], [], [], 0.1)[0]: # Timeout of 0.1 seconds
                 key = sys.stdin.read(1)
                 if key == 'r':
+                    new_status_str = ""
                     with self._recording_lock:
                         self.is_recording = not self.is_recording
                         status = "STARTED" if self.is_recording else "STOPPED"
+                        new_status_str = f"Recording {status}. Press 'r' again to toggle, 'q' to quit."
                         self.get_logger().info(f"Recording {status}")
-                        print(f"\rRecording {status}. Press 'r' again to toggle, 'q' to quit.") # Print status to terminal
+                    # Print status update outside the lock
+                    print(f"\r{new_status_str:<80}", end="") # Pad with spaces to clear previous line
+                    sys.stdout.flush()
                 elif key == 'q':
                     self.get_logger().info("Quit key pressed. Shutting down...")
-                    print("\rQuitting...")
-
+                    print("\rQuitting...                                        ") # Clear line
+                    sys.stdout.flush()
                     rclpy.shutdown()
                     break # Exit the listener loop
             # Small sleep to prevent high CPU usage if select has 0 timeout
@@ -156,11 +173,22 @@ class ImageRecorderNode(Node):
 
     def restore_terminal(self):
         """Restores the terminal to its original settings."""
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, original_terminal_settings)
-        print("\rTerminal settings restored.") # Print confirmation
+        # Check if stdin is a tty before attempting to restore
+        if sys.stdin.isatty():
+            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, original_terminal_settings)
+            print("\rTerminal settings restored.") # Print confirmation
+        else:
+            self.get_logger().warn("stdin is not a TTY, cannot restore terminal settings.")
 
     def destroy_node(self):
         """Clean up resources."""
+        self.get_logger().info("Shutting down node...")
+        # Ensure keyboard listener thread knows to exit if shutdown initiated elsewhere
+        # rclpy.shutdown() # Usually called externally or by keyboard listener
+
+        # Shutdown executor gracefully
+        self.get_logger().info("Shutting down file writer executor...")
+        self.file_writer_executor.shutdown(wait=True) # Wait for pending writes
         self.restore_terminal() # Ensure terminal is restored on shutdown
         super().destroy_node()
 
@@ -182,10 +210,10 @@ def main(args=None):
         # Cleanup
         if node:
             node.destroy_node() # This includes restoring terminal settings
-        if rclpy.ok():
+        elif sys.stdin.isatty(): # Restore terminal if node creation failed but stdin is tty
+             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, original_terminal_settings)
+        if rclpy.ok(): # Ensure shutdown happens
              rclpy.shutdown()
-        # Explicitly restore terminal just in case destroy_node wasn't called properly
-        termios.tcsetattr(sys.stdin, termios.TCSADRAIN, original_terminal_settings)
         print("\rShutdown complete.")
 
 

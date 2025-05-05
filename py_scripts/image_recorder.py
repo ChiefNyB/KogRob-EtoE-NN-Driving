@@ -12,6 +12,7 @@ import tty
 import termios
 from datetime import datetime
 import threading
+import concurrent.futures
 
 # Store original terminal settings
 original_terminal_settings = termios.tcgetattr(sys.stdin)
@@ -41,6 +42,9 @@ class ImageRecorderNode(Node):
         # Recording state variables
         self.is_recording = False
         self._recording_lock = threading.Lock() # Lock for thread-safe access to is_recording
+        
+        # New thread for file writing
+        self.file_writer_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) # Only need 1 worker for sequential writes
 
         # Create output directory if it doesn't exist
         try:
@@ -63,7 +67,7 @@ class ImageRecorderNode(Node):
         # queue_size: How many messages of each type to store before matching.
         # slop: Max time difference (in seconds) allowed between messages.
         self.time_synchronizer = message_filters.ApproximateTimeSynchronizer(
-            [self.image_sub, self.joy_xy_sub], queue_size=15, slop=0.1, allow_headerless=True
+            [self.image_sub, self.joy_xy_sub], queue_size=30, slop=0.1, allow_headerless=True
 
         )
         # Register the callback for synchronized messages
@@ -80,13 +84,24 @@ class ImageRecorderNode(Node):
         self.keyboard_thread.daemon = True # Allows program to exit even if thread is running
         self.keyboard_thread.start()
 
+    def save_image_async(self, filepath, data):
+        """Function to be run in a separate thread for saving."""
+        try:
+            with open(filepath, 'wb') as f:
+                f.write(data)
+            # self.get_logger().debug(f"Saved image: {filename}") # Careful logging from threads
+        except IOError as e:
+            self.get_logger().error(f"Failed to save image {os.path.basename(filepath)}: {e}")
+        except Exception as e:
+            self.get_logger().error(f"An unexpected error occurred while saving image: {e}")
+
     def synchronized_callback(self, image_msg: CompressedImage, joy_msg: Float32MultiArray):
         """Callback function for processing synchronized image and joystick messages."""
+        # --- Keep the recording check and data extraction in the main thread ---
         with self._recording_lock:
             if not self.is_recording:
-                return # Do nothing if not recording
+                return
 
-        # Extract joystick values directly from the synchronized message
         joy_x = 0.0
         joy_y = 0.0
         if len(joy_msg.data) >= 2:
@@ -95,40 +110,28 @@ class ImageRecorderNode(Node):
         else:
             self.get_logger().warn(f"Received synchronized Float32MultiArray with < 2 elements: {len(joy_msg.data)}. Using 0.0 for X/Y.")
 
-        # --- Check for non-zero joystick values ---
         epsilon = 1e-6
         if abs(joy_x) < epsilon and abs(joy_y) < epsilon:
             self.get_logger().debug("Skipping image: Velocities near zero.")
             return
 
-
-        # Construct filename
         now = datetime.now()
-        timestamp = now.strftime("%Y%m%d_%H%M%S_%f")[:-3] # YYYYMMDD_HHMMSS_ms
-        # Format floats to avoid overly long filenames and potential issues
-        joy_x_str = f"{joy_x:.3f}".replace('.', 'p').replace('-', 'n') # Replace . with p, - with n
-        joy_y_str = f"{joy_y:.3f}".replace('.', 'p').replace('-', 'n') # Replace . with p, - with n
+        timestamp = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]
+        joy_x_str = f"{joy_x:.3f}".replace('.', 'p').replace('-', 'n')
+        joy_y_str = f"{joy_y:.3f}".replace('.', 'p').replace('-', 'n')
 
-        # Determine file extension based on format (default to jpg)
         extension = "jpg"
         if image_msg.format and "jpeg" in image_msg.format.lower():
-             extension = "jpg"
+            extension = "jpg"
         elif image_msg.format and "png" in image_msg.format.lower():
-             extension = "png"
-        # Add more formats if needed
+            extension = "png"
 
         filename = f"{timestamp}_X{joy_x_str}_Y{joy_y_str}.{extension}"
         filepath = os.path.join(self.output_dir, filename)
+        image_data = image_msg.data # Copy data needed by the thread
 
-        # Save the image data
-        try:
-            with open(filepath, 'wb') as f:
-                f.write(image_msg.data)
-            # self.get_logger().debug(f"Saved image: {filename}") # Log if needed (can be verbose)
-        except IOError as e:
-            self.get_logger().error(f"Failed to save image {filename}: {e}")
-        except Exception as e:
-            self.get_logger().error(f"An unexpected error occurred while saving image: {e}")
+        # --- Submit the file writing task to the executor ---
+        self.file_writer_executor.submit(self.save_image_async, filepath, image_data)
 
 
     def keyboard_listener(self):
@@ -166,6 +169,8 @@ class ImageRecorderNode(Node):
 
     def destroy_node(self):
         """Clean up resources."""
+        self.get_logger().info("Shutting down file writer executor...")
+        self.file_writer_executor.shutdown(wait=True) # Wait for pending writes
         self.restore_terminal() # Ensure terminal is restored on shutdown
         super().destroy_node()
 
