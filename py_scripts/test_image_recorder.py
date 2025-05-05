@@ -3,8 +3,8 @@
 import rclpy
 from rclpy.node import Node
 from sensor_msgs.msg import CompressedImage
-from std_msgs.msg import Float32MultiArray
 import message_filters
+from geometry_msgs.msg import Twist # Import Twist message type
 import os
 import sys
 import select
@@ -22,12 +22,12 @@ class ImageRecorderNode(Node):
 
     Subscribes to:
         /image/compressed (sensor_msgs/CompressedImage): The compressed image stream. (Synchronized)
-        /joy_xy (std_msgs/Float32MultiArray): Joystick X and Y values ([X, Y]).
+        /cmd_vel (geometry_msgs/Twist): The command velocity messages. (Synchronized)
 
     Functionality:
         - Press 'r' to toggle recording on/off.
         - When recording, saves images to 'labelled_data/' directory.
-        - Filename format: YYYYMMDD_HHMMSS_ms_X<joy_x>_Y<joy_y>.jpg
+        - Filename format: YYYYMMDD_HHMMSS_ms_LinX<linear_x>_AngZ<angular_z>.jpg
         - Press 'q' or Ctrl+C to quit gracefully.
     """
     def __init__(self):
@@ -36,7 +36,7 @@ class ImageRecorderNode(Node):
         # Parameters (optional, could be declared/fetched)
         self.output_dir = "labelled_data"
         self.image_topic = "/image_raw/compressed"
-        self.joy_xy_topic = "/joy_xy" # Combined topic
+        self.cmd_vel_topic = "/cmd_vel" # Changed topic
 
         # Recording state variables
         self.is_recording = False
@@ -56,15 +56,14 @@ class ImageRecorderNode(Node):
         # --- Message Filters Setup ---
         # Create subscribers using message_filters
         self.image_sub = message_filters.Subscriber(self, CompressedImage, self.image_topic)
-        self.joy_xy_sub = message_filters.Subscriber(self, Float32MultiArray, self.joy_xy_topic)
+        self.cmd_vel_sub = message_filters.Subscriber(self, Twist, self.cmd_vel_topic) # Use Twist message type
 
         # Create an ApproximateTimeSynchronizer
         # Adjust queue_size and slop as needed
         # queue_size: How many messages of each type to store before matching.
         # slop: Max time difference (in seconds) allowed between messages.
         self.time_synchronizer = message_filters.ApproximateTimeSynchronizer(
-            [self.image_sub, self.joy_xy_sub], queue_size=15, slop=0.1, allow_headerless=True
-
+            [self.image_sub, self.cmd_vel_sub], queue_size=15, slop=0.1, allow_headerless=True # Allow messages without headers
         )
         # Register the callback for synchronized messages
         self.time_synchronizer.registerCallback(self.synchronized_callback)
@@ -72,7 +71,7 @@ class ImageRecorderNode(Node):
 
         self.get_logger().info(f"Node initialized. Subscribed to:")
         self.get_logger().info(f"  Image: {self.image_topic}")
-        self.get_logger().info(f"  Joy XY: {self.joy_xy_topic}") # Updated log message
+        self.get_logger().info(f"  Cmd Vel: {self.cmd_vel_topic}") # Updated log message
         self.get_logger().info("Press 'r' to toggle recording. Press 'q' to quit.")
 
         # Start keyboard listener thread
@@ -80,24 +79,21 @@ class ImageRecorderNode(Node):
         self.keyboard_thread.daemon = True # Allows program to exit even if thread is running
         self.keyboard_thread.start()
 
-    def synchronized_callback(self, image_msg: CompressedImage, joy_msg: Float32MultiArray):
-        """Callback function for processing synchronized image and joystick messages."""
+    def synchronized_callback(self, image_msg: CompressedImage, cmd_vel_msg: Twist):
+        """Callback function for processing synchronized image and cmd_vel messages."""
         with self._recording_lock:
             if not self.is_recording:
                 return # Do nothing if not recording
 
-        # Extract joystick values directly from the synchronized message
-        joy_x = 0.0
-        joy_y = 0.0
-        if len(joy_msg.data) >= 2:
-            joy_x = joy_msg.data[0]
-            joy_y = joy_msg.data[1]
-        else:
-            self.get_logger().warn(f"Received synchronized Float32MultiArray with < 2 elements: {len(joy_msg.data)}. Using 0.0 for X/Y.")
+        # Extract linear.x and angular.z from the Twist message
+        # These are typically the most relevant for ground robot control
+        linear_x = cmd_vel_msg.linear.x
+        angular_z = cmd_vel_msg.angular.z
 
-        # --- Check for non-zero joystick values ---
+        # --- Add check for non-zero velocity values ---
+        # Example using tolerance (adjust epsilon as needed)
         epsilon = 1e-6
-        if abs(joy_x) < epsilon and abs(joy_y) < epsilon:
+        if abs(linear_x) < epsilon and abs(angular_z) < epsilon:
             self.get_logger().debug("Skipping image: Velocities near zero.")
             return
 
@@ -105,9 +101,8 @@ class ImageRecorderNode(Node):
         # Construct filename
         now = datetime.now()
         timestamp = now.strftime("%Y%m%d_%H%M%S_%f")[:-3] # YYYYMMDD_HHMMSS_ms
-        # Format floats to avoid overly long filenames and potential issues
-        joy_x_str = f"{joy_x:.3f}".replace('.', 'p').replace('-', 'n') # Replace . with p, - with n
-        joy_y_str = f"{joy_y:.3f}".replace('.', 'p').replace('-', 'n') # Replace . with p, - with n
+        lin_x_str = f"{linear_x:.3f}".replace('.', 'p').replace('-', 'n') # Replace decimal point and negative sign
+        ang_z_str = f"{angular_z:.3f}".replace('.', 'p').replace('-', 'n') # Replace decimal point and negative sign
 
         # Determine file extension based on format (default to jpg)
         extension = "jpg"
@@ -117,7 +112,7 @@ class ImageRecorderNode(Node):
              extension = "png"
         # Add more formats if needed
 
-        filename = f"{timestamp}_X{joy_x_str}_Y{joy_y_str}.{extension}"
+        filename = f"{timestamp}_LinX{lin_x_str}_AngZ{ang_z_str}.{extension}" # Updated filename format
         filepath = os.path.join(self.output_dir, filename)
 
         # Save the image data

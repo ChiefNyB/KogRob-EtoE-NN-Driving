@@ -172,9 +172,12 @@ for imagePath in imagePaths:
         y_val = None
         for part in parts:
             if part.startswith('X') and len(part) > 1:
-                x_val = float(part[1:]) # Get the value after 'X'
+                # Replace 'p' with '.' and 'n' with '-' before converting to float
+                x_str = part[1:].replace('p', '.').replace('n', '-')
+                x_val = float(x_str)
             elif part.startswith('Y') and len(part) > 1:
-                y_val = float(part[1:]) # Get the value after 'Y'
+                y_str = part[1:].replace('p', '.').replace('n', '-')
+                y_val = float(y_str)
 
         # Check if both values were found and are valid numbers
         if x_val is not None and y_val is not None:

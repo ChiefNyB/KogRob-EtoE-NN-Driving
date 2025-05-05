@@ -37,6 +37,7 @@ setup(
     entry_points={
         'console_scripts': [
             "image_recorder = py_scripts.image_recorder:main",
+            "test_image_recorder = py_scripts.test_image_recorder:main",
             "joy_republisher = py_scripts.joy_republisher:main",
             "joy_xy_republisher = py_scripts.joy_xy_republisher:main",
             "joy_xy_publisher = py_scripts.joy_xy_publisher:main"

@@ -57,12 +57,6 @@ Finally, after installing all dependencies, run the ```colcon build``` command i
 
 ## 2. How to use
 
-### World
-
-First of all, open a world from the turtlebot3 repository, or use one of the following launch files:
-```bash
-
-```
 
 ### Controller
 Manual control of the turtlebot with joystick can be started using the launch file:
@@ -93,14 +87,20 @@ ros2 run KogRob-EtoE-NN-Driving image_recorder
 You can control the recording by:
 *   Press the `r` key in the terminal where `image_recorder` is running to **start** recording.
 *   Press `r` again to **stop** recording. You can toggle recording on and off as needed while driving the robot.
-*   Press `q` or Ctrl+C to **quit** the recorder node gracefully.
+*   Press `q` or to **quit** the recorder node gracefully.
 
 When recording is active, the node listens for synchronized image and joystick messages. It will save the compressed image **only if either the X or Y joystick value (or both) is non-zero**. This avoids saving images when the robot is stationary.
 
 
-The training images are saved under the folder```labelled_data``` with a name similar to this: ```..._X0.5_Y0.86.png```
+The training images are saved under the folder```labelled_data``` with a name similar to this: ```..._Xn0p5_Y0p86.png```
 
-Here the number after ```X``` represents the normalized linear (forward-backward) speed, while the number after ```Y``` denotes the normalized angular (left-right) speed.
+Here the number after ```X``` represents the normalized linear (forward-backward) speed (in this case: -0.5), while the number after ```Y``` denotes the normalized angular (left-right) speed (in this example: 0.86).
+
+The ```test_image_recorder``` node can be used for test and debug purposes only:
+```bash
+ros2 run KogRob-EtoE-NN-Driving test_image_recorder
+```
+It works with Twist messages on the /cmd_vel topic, and uses a slightly different image notation.
 
 ### Neural network creation and teaching
 The origin of the CNN model is NVIDIA's [DAVE-2](https://developer.nvidia.com/blog/deep-learning-self-driving-cars/), with the slight modification of outputting linear and angular speed, instead of giving only the reciprical of the turning radius.
