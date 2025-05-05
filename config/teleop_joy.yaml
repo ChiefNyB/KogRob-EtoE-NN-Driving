@@ -7,7 +7,7 @@ teleop_twist_joy_node:
     require_enable_button: false
     inverted_reverse: true   
 
-joy_node:
+joy_linux_node:
   ros__parameters:
     deadzone: 0.05
     autorepeat_rate: 20.0

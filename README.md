@@ -23,7 +23,7 @@ And installing the packages below using apt:
 ```bash
 sudo apt install python3-pip
 sudo apt install pipx
-sudo apt install ros-jazzy-joy
+sudo apt install ros-jazzy-joy-linux
 sudo apt install ros-jazzy-teleop-twist-joy
 sudo apt install ros-jazzy-message-filters
 ```
