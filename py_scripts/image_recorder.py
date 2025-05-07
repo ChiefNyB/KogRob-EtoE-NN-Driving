@@ -2,9 +2,10 @@
 
 import rclpy
 from rclpy.node import Node
+from rclpy.qos import qos_profile_sensor_data
 from sensor_msgs.msg import CompressedImage
-from std_msgs.msg import Float32MultiArray # For /joy_xy
-from geometry_msgs.msg import Twist       # For /cmd_vel
+from std_msgs.msg import Float32MultiArray  # For /joy_xy
+from geometry_msgs.msg import Twist        # For /cmd_vel
 import message_filters
 import os
 import sys
@@ -15,8 +16,14 @@ from datetime import datetime
 import threading
 import concurrent.futures
 
-# Store original terminal settings
-original_terminal_settings = termios.tcgetattr(sys.stdin)
+# Store original terminal settings (use fileno)
+_original_fd = sys.stdin.fileno() if sys.stdin.isatty() else None
+original_terminal_settings = None
+if _original_fd is not None:
+    try:
+        original_terminal_settings = termios.tcgetattr(_original_fd)
+    except termios.error:
+        original_terminal_settings = None
 
 class ImageRecorderNode(Node):
     """
@@ -31,16 +38,14 @@ class ImageRecorderNode(Node):
     Functionality:
         - Press 'r' to toggle recording on/off.
         - When recording, saves images to 'labelled_data/' directory.
-        - Filename format depends on the velocity source:
-            - For /joy_xy: YYYYMMDD_HHMMSS_ms_X<joy_x>_Y<joy_y>.jpg
-            - For /cmd_vel: YYYYMMDD_HHMMSS_ms_LinX<linear_x>_AngZ<angular_z>.jpg
+        - Filename format depends on the velocity source.
         - Press 'q' or Ctrl+C to quit gracefully.
     """
     def __init__(self):
         super().__init__('image_recorder_node')
 
         # Declare parameter for choosing velocity topic
-        self.declare_parameter('use_cmd_vel', False) # Default to False (use /joy_xy)
+        self.declare_parameter('use_cmd_vel', False)  # Default to False (use /joy_xy)
         self.use_cmd_vel = self.get_parameter('use_cmd_vel').get_parameter_value().bool_value
 
         # Configuration
@@ -49,181 +54,162 @@ class ImageRecorderNode(Node):
 
         # Recording state variables
         self.is_recording = False
-        self._recording_lock = threading.Lock() # Lock for thread-safe access to is_recording
-        
-        # New thread for file writing
-        self.file_writer_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1) # Only need 1 worker for sequential writes
+        self._recording_lock = threading.Lock()
 
-        # Create output directory if it doesn't exist
+        # File writer executor
+        self.file_writer_executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+        # Create output directory
         try:
             os.makedirs(self.output_dir, exist_ok=True)
             self.get_logger().info(f"Saving images to: {os.path.abspath(self.output_dir)}")
         except OSError as e:
             self.get_logger().error(f"Failed to create output directory {self.output_dir}: {e}")
-            # Optionally exit or handle differently
-            if rclpy.ok(): rclpy.shutdown()
+            rclpy.shutdown()
             sys.exit(1)
 
-
-        # --- Message Filters Setup ---
-        # Create subscribers using message_filters
-        self.image_sub = message_filters.Subscriber(self, CompressedImage, self.image_topic)
-
+        # Message filters with sensor_data QoS
+        self.image_sub = message_filters.Subscriber(
+            self,
+            CompressedImage,
+            self.image_topic,
+            qos_profile=qos_profile_sensor_data
+        )
         if self.use_cmd_vel:
             self.velocity_topic = "/cmd_vel"
-            self.velocity_sub = message_filters.Subscriber(self, Twist, self.velocity_topic)
+            self.velocity_sub = message_filters.Subscriber(
+                self,
+                Twist,
+                self.velocity_topic,
+                qos_profile=qos_profile_sensor_data
+            )
             self.get_logger().info(f"Using /cmd_vel topic for velocity data.")
         else:
             self.velocity_topic = "/joy_xy"
-            self.velocity_sub = message_filters.Subscriber(self, Float32MultiArray, self.velocity_topic)
+            self.velocity_sub = message_filters.Subscriber(
+                self,
+                Float32MultiArray,
+                self.velocity_topic,
+                qos_profile=qos_profile_sensor_data
+            )
             self.get_logger().info(f"Using /joy_xy topic for velocity data.")
 
-        # Create an ApproximateTimeSynchronizer
-        # Adjust queue_size and slop as needed
-        # queue_size: How many messages of each type to store before matching.
-        # slop: Max time difference (in seconds) allowed between messages.
+        # Synchronizer: holds ~0.5s of messages at 30fps
         self.time_synchronizer = message_filters.ApproximateTimeSynchronizer(
-            [self.image_sub, self.velocity_sub], queue_size=30, slop=0.1, allow_headerless=True
+            [self.image_sub, self.velocity_sub],
+            queue_size=15,
+            slop=0.2,
+            allow_headerless=True
         )
-        # Register the callback for synchronized messages
         self.time_synchronizer.registerCallback(self.synchronized_callback)
-        # -----------------------------
 
-        self.get_logger().info(f"Node initialized. Subscribed to:")
+        self.get_logger().info("Node initialized. Subscribed to:")
         self.get_logger().info(f"  Image: {self.image_topic}")
-        if self.use_cmd_vel:
-            self.get_logger().info(f"  Cmd Vel: {self.velocity_topic}")
+        self.get_logger().info(f"  Velocity: {self.velocity_topic}")
+
+        # Terminal output handle (/dev/tty) for status
+        self.tty_out = None
+        if sys.stdin.isatty():
+            try:
+                self.tty_out = open('/dev/tty', 'w')
+            except Exception:
+                self.tty_out = None
+        if not self.tty_out:
+            self.get_logger().warn("Cannot open /dev/tty; keyboard status prints disabled.")
+
+        # Keyboard listener
+        if sys.stdin.isatty() and original_terminal_settings:
+            self.get_logger().info("Press 'r' to toggle recording. Press 'q' to quit.")
+            self.keyboard_thread = threading.Thread(target=self.keyboard_listener)
+            self.keyboard_thread.daemon = True
+            self.keyboard_thread.start()
         else:
-            self.get_logger().info(f"  Joy XY: {self.velocity_topic}")
-
-        self.get_logger().info("Press 'r' to toggle recording. Press 'q' to quit.")
-
-        # Start keyboard listener thread
-        self.keyboard_thread = threading.Thread(target=self.keyboard_listener)
-        self.keyboard_thread.daemon = True # Allows program to exit even if thread is running
-        self.keyboard_thread.start()
+            self.get_logger().warn("stdin is not a TTY or terminal settings unavailable; keyboard controls disabled.")
 
     def save_image_async(self, filepath, data):
-        """Function to be run in a separate thread for saving."""
         try:
             with open(filepath, 'wb') as f:
                 f.write(data)
-            # self.get_logger().debug(f"Saved image: {os.path.basename(filepath)}") # Uncomment if needed
-        except IOError as e:
-            self.get_logger().error(f"Failed to save image {os.path.basename(filepath)}: {e}")
         except Exception as e:
-            self.get_logger().error(f"An unexpected error occurred while saving image {os.path.basename(filepath)}: {e}")
+            self.get_logger().error(f"Failed to save image {os.path.basename(filepath)}: {e}")
 
     def synchronized_callback(self, image_msg: CompressedImage, velocity_msg):
-        """Callback function for processing synchronized image and velocity messages."""
-        # --- Keep the recording check and data extraction in the main thread ---
         with self._recording_lock:
             if not self.is_recording:
                 return
 
-        epsilon = 1e-6
         now = datetime.now()
         timestamp = now.strftime("%Y%m%d_%H%M%S_%f")[:-3]
-        
-        extension = "jpg"
-        if image_msg.format and "jpeg" in image_msg.format.lower():
-            extension = "jpg"
-        elif image_msg.format and "png" in image_msg.format.lower():
-            extension = "png"
+        ext = 'jpg' if 'jpeg' in (image_msg.format or '').lower() else 'png'
 
-        filename_suffix = ""
-
+        epsilon = 1e-6
+        suffix = ''
         if self.use_cmd_vel:
-            # Using Twist message from /cmd_vel
-            if not isinstance(velocity_msg, Twist):
-                self.get_logger().error(f"Expected Twist message but got {type(velocity_msg)}. Skipping.")
-                return
-            linear_x = velocity_msg.linear.x
-            angular_z = velocity_msg.angular.z
-
-            if abs(linear_x) < epsilon and abs(angular_z) < epsilon:
-                self.get_logger().debug("Skipping image: Velocities (cmd_vel) near zero.")
-                return
-            
-            lin_x_str = f"{linear_x:.3f}".replace('.', 'p').replace('-', 'n')
-            ang_z_str = f"{angular_z:.3f}".replace('.', 'p').replace('-', 'n')
-            filename_suffix = f"LinX{lin_x_str}_AngZ{ang_z_str}"
+            if not isinstance(velocity_msg, Twist): return
+            lx, az = velocity_msg.linear.x, velocity_msg.angular.z
+            if abs(lx) < epsilon and abs(az) < epsilon: return
+            lin = f"{lx:.3f}".replace('.', 'p').replace('-', 'n')
+            ang = f"{az:.3f}".replace('.', 'p').replace('-', 'n')
+            suffix = f"LinX{lin}_AngZ{ang}"
         else:
-            # Using Float32MultiArray from /joy_xy
-            if not isinstance(velocity_msg, Float32MultiArray):
-                self.get_logger().error(f"Expected Float32MultiArray message but got {type(velocity_msg)}. Skipping.")
-                return
-            joy_x, joy_y = 0.0, 0.0
-            if len(velocity_msg.data) >= 2:
-                joy_x = velocity_msg.data[0]
-                joy_y = velocity_msg.data[1]
-            else:
-                self.get_logger().warn(f"Received synchronized Float32MultiArray with < 2 elements: {len(velocity_msg.data)}. Using 0.0 for X/Y.")
+            if not isinstance(velocity_msg, Float32MultiArray): return
+            data = velocity_msg.data
+            x, y = (data[0], data[1]) if len(data)>=2 else (0.0, 0.0)
+            if abs(x) < epsilon and abs(y) < epsilon: return
+            xs = f"{x:.3f}".replace('.', 'p').replace('-', 'n')
+            ys = f"{y:.3f}".replace('.', 'p').replace('-', 'n')
+            suffix = f"X{xs}_Y{ys}"
 
-            if abs(joy_x) < epsilon and abs(joy_y) < epsilon:
-                self.get_logger().debug("Skipping image: Velocities (joy_xy) near zero.")
-                return
-            joy_x_str = f"{joy_x:.3f}".replace('.', 'p').replace('-', 'n')
-            joy_y_str = f"{joy_y:.3f}".replace('.', 'p').replace('-', 'n')
-            filename_suffix = f"X{joy_x_str}_Y{joy_y_str}"
-
-        filename = f"{timestamp}_{filename_suffix}.{extension}"
-        filepath = os.path.join(self.output_dir, filename)
-        image_data = image_msg.data # Copy data needed by the thread
-
-        # --- Submit the file writing task to the executor ---
-        self.file_writer_executor.submit(self.save_image_async, filepath, image_data)
-
+        filename = f"{timestamp}_{suffix}.{ext}"
+        path = os.path.join(self.output_dir, filename)
+        self.file_writer_executor.submit(self.save_image_async, path, image_msg.data)
 
     def keyboard_listener(self):
-        """Listens for keyboard input ('r' to toggle recording, 'q' to quit)."""
-        # Set terminal to raw mode to capture single key presses
-        tty.setraw(sys.stdin.fileno())
-        # Print initial status without newline to allow overwriting
-        print(f"\rRecording {'STARTED' if self.is_recording else 'STOPPED'}. Press 'r' again to toggle, 'q' to quit.", end="")
-        sys.stdout.flush() # Ensure it's displayed immediately
-
+        # raw mode
+        tty.setraw(_original_fd)
+        # initial print
+        self._print_status()
         while rclpy.ok():
-            # Use select for non-blocking check of stdin
-            if select.select([sys.stdin], [], [], 0.1)[0]: # Timeout of 0.1 seconds
+            if select.select([sys.stdin], [], [], 0.1)[0]:
                 key = sys.stdin.read(1)
                 if key == 'r':
-                    new_status_str = ""
                     with self._recording_lock:
                         self.is_recording = not self.is_recording
-                        status = "STARTED" if self.is_recording else "STOPPED"
-                        new_status_str = f"Recording {status}. Press 'r' again to toggle, 'q' to quit."
-                        self.get_logger().info(f"Recording {status}")
-                    # Print status update outside the lock
-                    print(f"\r{new_status_str:<80}", end="") # Pad with spaces to clear previous line
-                    sys.stdout.flush()
+                    self.get_logger().info(f"Recording {'STARTED' if self.is_recording else 'STOPPED'}")
+                    self._print_status()
                 elif key == 'q':
                     self.get_logger().info("Quit key pressed. Shutting down...")
-                    print("\rQuitting...                                        ") # Clear line
-                    sys.stdout.flush()
-                    if rclpy.ok(): rclpy.shutdown()
-                    break # Exit the listener loop
-            # Small sleep to prevent high CPU usage if select has 0 timeout
-            # time.sleep(0.01) # Already handled by select timeout
+                    self._print_message("Quitting...")
+                    rclpy.shutdown()
+                    break
+        self.restore_terminal()
 
-        # Restore terminal settings when loop exits
-        # Ensure restore_terminal is called even if rclpy.ok() becomes false due to external shutdown
-        if sys.stdin.isatty():
-            self.restore_terminal()
+    def _print_status(self):
+        if not self.tty_out: return
+        status = 'STARTED' if self.is_recording else 'STOPPED'
+        self.tty_out.write(f"\rRecording {status}. Press 'r' to toggle, 'q' to quit.")
+        self.tty_out.flush()
+
+    def _print_message(self, msg):
+        if not self.tty_out: return
+        self.tty_out.write(f"\r{msg:<80}")
+        self.tty_out.flush()
 
     def restore_terminal(self):
-        """Restores the terminal to its original settings."""
-        if sys.stdin.isatty(): # Check if stdin is a TTY
-            termios.tcsetattr(sys.stdin, termios.TCSADRAIN, original_terminal_settings)
-            print("\rTerminal settings restored.") # Print confirmation
-        else:
-            self.get_logger().warn("stdin is not a TTY, cannot restore terminal settings.")
+        if _original_fd is not None and original_terminal_settings:
+            try:
+                termios.tcsetattr(_original_fd, termios.TCSADRAIN, original_terminal_settings)
+            except Exception:
+                pass
 
     def destroy_node(self):
-        """Clean up resources."""
         self.get_logger().info("Shutting down file writer executor...")
-        self.file_writer_executor.shutdown(wait=True) # Wait for pending writes
-        self.restore_terminal() # Ensure terminal is restored on shutdown
+        self.file_writer_executor.shutdown(wait=True)
+        self.restore_terminal()
+        # final message
+        if self.tty_out:
+            self.tty_out.write("\rShutdown complete.\n")
+            self.tty_out.flush()
         super().destroy_node()
 
 
@@ -234,23 +220,16 @@ def main(args=None):
         node = ImageRecorderNode()
         rclpy.spin(node)
     except KeyboardInterrupt:
-        print("\rCtrl+C detected. Shutting down...")
+        pass
     except Exception as e:
         if node:
             node.get_logger().error(f"Unhandled exception: {e}")
         else:
             print(f"Unhandled exception during node creation: {e}")
     finally:
-        # Cleanup
         if node:
-            node.destroy_node() # This should include restoring terminal settings
-        elif sys.stdin.isatty(): # Restore terminal if node creation failed but stdin is tty
-             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, original_terminal_settings)
-        if rclpy.ok(): # Ensure shutdown happens if not already
-             rclpy.shutdown()
-        # Ensure terminal is restored one last time if it's a TTY and not already handled
-        # This is a fallback, destroy_node should ideally handle it.
-        print("\rShutdown complete.")
+            node.destroy_node()
+        rclpy.shutdown()
 
 
 if __name__ == '__main__':
