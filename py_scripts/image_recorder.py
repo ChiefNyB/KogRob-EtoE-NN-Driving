@@ -196,24 +196,22 @@ class ImageRecorderNode(Node):
         epsilon = 1e-6
         suffix = ''
         if self.use_cmd_vel and isinstance(velocity_msg, Twist):
-            lx, az = velocity_msg.linear.x, velocity_msg.angular.z
-            if abs(lx) < epsilon and abs(az) < epsilon: return
-            lin = f"{lx:.3f}".replace('.', 'p').replace('-', 'n')
-            ang = f"{az:.3f}".replace('.', 'p').replace('-', 'n')
-            suffix = f"LinX{lin}_AngZ{ang}"
+            x, y = velocity_msg.linear.x, velocity_msg.angular.z
         elif isinstance(velocity_msg, Float32MultiArray):
             data = velocity_msg.data
             x, y = (data[0], data[1]) if len(data) >= 2 else (0.0, 0.0)
-            if abs(x) < epsilon and abs(y) < epsilon: return
-            xs = f"{x:.3f}".replace('.', 'p').replace('-', 'n')
-            ys = f"{y:.3f}".replace('.', 'p').replace('-', 'n')
-            suffix = f"X{xs}_Y{ys}"
+
         else: # Should not happen if subscriptions and parameters are correct
             self.get_logger().warn(
                 f"Unexpected velocity message type ({type(velocity_msg)}) or invalid data "
                 f"when trying to save image for ROS time {image_ros_time.nanoseconds*1e-9:.3f}. Skipping save.\n"
             )
             return
+        
+        if abs(x) < epsilon and abs(y) < epsilon: return
+        xs = f"{x:.3f}".replace('.', 'p').replace('-', 'n')
+        ys = f"{y:.3f}".replace('.', 'p').replace('-', 'n')
+        suffix = f"X{xs}_Y{ys}"
 
         filename = f"{timestamp_str}_{suffix}.{ext}"
         path = os.path.join(self.output_dir, filename)

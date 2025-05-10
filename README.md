@@ -92,11 +92,11 @@ You can control the recording by:
 When recording is active, the node listens for synchronized image and joystick messages. It will save the compressed image **only if either the X or Y joystick value (or both) is non-zero**. This avoids saving images when the robot is stationary.
 
 
-The training images are saved under the folder```labelled_data``` with a name similar to this: ```..._Xn0p5_Y0p86.png```
+The training images are saved under the folder```labelled_data``` with a name similar to this: ```..._Xn0p500_Y0p860.png```
 
-Here the number after ```X``` represents the normalized linear (forward-backward) speed (in this case: -0.5), while the number after ```Y``` denotes the normalized angular (left-right) speed (in this example: 0.86).
+Here the number after ```Y``` represents the normalized linear (forward-backward) speed (in this case: -0.5), while the number after ```X``` denotes the normalized angular (left-right) speed (in this example: 0.86).
 
-The ```image_recorder``` node can be used in an altered mode, when listening to the ```\cmd_vel``` topic instead of ```\joy_xy``` and uses a slightly different image notation. It is intended for testing and debug purposes only:
+The ```image_recorder``` node can be used in an altered mode, when listening to the ```\cmd_vel``` topic instead of ```\joy_xy``` . It is intended for testing and debug purposes only:
 ```bash
 ros2 run KogRob-EtoE-NN-Driving image_recorder --ros-args -p use_cmd_vel:=True
 ```
