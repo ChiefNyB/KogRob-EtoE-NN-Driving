@@ -16,6 +16,9 @@ import cv2
 import os
 import matplotlib.pyplot as plt
 from numpy.random import seed
+import sys
+
+
 
 # Set image size
 image_size = {"width": 200, "height": 66}
@@ -26,6 +29,7 @@ seed(1)
 set_seed(2)
 random.seed(42)
 
+sys.stdout.flush()
 print("[INFO] Version:")
 print("Tensorflow version: %s" % tf.__version__)
 keras_version = str(keras_version).encode('utf8')
