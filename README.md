@@ -76,7 +76,7 @@ ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
 
 ### Labelled data acquisition
 
-To collect training data, recorded images paired with the corresponding joystick commands are saved. The `image_recorder` node is responsible for doing so.
+To collect training data, recorded images paired with the corresponding joystick commands are saved. The `image_recorder` node is responsible for doing so. It is recording images with 10FPS as in the example project.
 
 For utilising, make sure messages are being published on the `/image_raw/compressed` topic (from the camera) and the `/joy_xy` topic (from the `joy_teleop_manual.launch.py` or a similar source).
 Open a new terminal and run the node:
@@ -87,7 +87,7 @@ ros2 run KogRob-EtoE-NN-Driving image_recorder
 You can control the recording by:
 *   Press the `r` key in the terminal where `image_recorder` is running to **start** recording.
 *   Press `r` again to **stop** recording. You can toggle recording on and off as needed while driving the robot.
-*   Press `q` or to **quit** the recorder node gracefully.
+*   Press `q` or Ctrl+C to **quit** the recorder node gracefully.
 
 When recording is active, the node listens for synchronized image and joystick messages. It will save the compressed image **only if either the X or Y joystick value (or both) is non-zero**. This avoids saving images when the robot is stationary.
 
