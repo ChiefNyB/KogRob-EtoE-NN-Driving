@@ -76,9 +76,9 @@ ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
 
 ### Labelled data acquisition
 
-To collect training data, recorded images paired with the corresponding joystick commands are saved. The `image_recorder` node is responsible for doing so.
+To collect training data, recorded images paired with the corresponding joystick commands are saved. The `image_recorder` node is responsible for doing so. It is recording images with 10FPS as in the example project.
 
-For utilising, make sure messages are being published on the `/image/compressed` topic (from the camera) and the `/joy_xy` topic (from the `joy_teleop_manual.launch.py` or a similar source).
+For utilising, make sure messages are being published on the `/image_raw/compressed` topic (from the camera) and the `/joy_xy` topic (from the `joy_teleop_manual.launch.py` or a similar source).
 Open a new terminal and run the node:
 
 ```bash
@@ -87,20 +87,19 @@ ros2 run KogRob-EtoE-NN-Driving image_recorder
 You can control the recording by:
 *   Press the `r` key in the terminal where `image_recorder` is running to **start** recording.
 *   Press `r` again to **stop** recording. You can toggle recording on and off as needed while driving the robot.
-*   Press `q` or to **quit** the recorder node gracefully.
+*   Press `q` or Ctrl+C to **quit** the recorder node gracefully.
 
 When recording is active, the node listens for synchronized image and joystick messages. It will save the compressed image **only if either the X or Y joystick value (or both) is non-zero**. This avoids saving images when the robot is stationary.
 
 
-The training images are saved under the folder```labelled_data``` with a name similar to this: ```..._Xn0p5_Y0p86.png```
+The training images are saved under the folder```labelled_data``` with a name similar to this: ```..._Xn0p500_Y0p860.png```
 
-Here the number after ```X``` represents the normalized linear (forward-backward) speed (in this case: -0.5), while the number after ```Y``` denotes the normalized angular (left-right) speed (in this example: 0.86).
+Here the number after ```Y``` represents the normalized linear (forward-backward) speed (in this case: -0.5), while the number after ```X``` denotes the normalized angular (left-right) speed (in this example: 0.86).
 
-The ```test_image_recorder``` node can be used for test and debug purposes only:
+The ```image_recorder``` node can be used in an altered mode, when listening to the ```\cmd_vel``` topic instead of ```\joy_xy``` . It is intended for testing and debug purposes only:
 ```bash
-ros2 run KogRob-EtoE-NN-Driving test_image_recorder
+ros2 run KogRob-EtoE-NN-Driving image_recorder --ros-args -p use_cmd_vel:=True
 ```
-It works with Twist messages on the /cmd_vel topic, and uses a slightly different image notation.
 
 ### Neural network creation and teaching
 The origin of the CNN model is NVIDIA's [DAVE-2](https://developer.nvidia.com/blog/deep-learning-self-driving-cars/), with the slight modification of outputting linear and angular speed, instead of giving only the reciprical of the turning radius.
