@@ -18,8 +18,17 @@ setup(
         (os.path.join('share', package_name, 'rviz'), glob('rviz/*.rviz')),
         (os.path.join('share', package_name, 'worlds'), glob('worlds/*.world')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
-        (os.path.join('share', package_name, 'gazebo_models'), glob('gazebo_models/*')),
-        (os.path.join('share', package_name, 'config'), glob('config/*.yaml'))
+        (os.path.join('share', package_name, 'gazebo_models', 'light_bg'),
+            [
+                'gazebo_models/light_bg/model.config',
+                'gazebo_models/light_bg/model.sdf',
+            ]
+        ),
+        (os.path.join('share', package_name, 'gazebo_models', 'light_bg', 'meshes'),
+            [
+                'gazebo_models/light_bg/meshes/light_bg.dae',
+            ]
+        )
     ],
     # Python requires
     install_requires=[
