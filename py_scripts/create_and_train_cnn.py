@@ -1,9 +1,10 @@
+
 # import the necessary packages
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Activation, Flatten, Dense, Conv2D, MaxPooling2D, Input, Dropout, LayerNormalization
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
+from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint, EarlyStopping
 from tensorflow.keras import __version__ as keras_version
 from tensorflow.keras.models import load_model
 from tensorflow.random import set_seed
@@ -17,6 +18,8 @@ import os
 import matplotlib.pyplot as plt
 from numpy.random import seed
 import sys
+from collections import Counter
+LEARN_MODE = 'x'  # Options: 'x' or 'xy'
 
 
 
@@ -58,7 +61,7 @@ else:
 
 
 # Model structure taken from: https://developer.nvidia.com/blog/deep-learning-self-driving-cars/
-def build_CNN(width, height, depth, activation='relu', dropout=0.25):
+def build_CNN(width, height, depth, activation='relu', dropout=0.25, output_size=2):
 
     # initialize the model
     model = Sequential()
@@ -116,8 +119,8 @@ def build_CNN(width, height, depth, activation='relu', dropout=0.25):
     model.add(Activation('relu'))
     model.add(Dropout(dropout))
 
-    # XY output (X:forward-backward, Y:left-right)
-    model.add(Dense(2))
+    # Output layer
+    model.add(Dense(output_size))
 
     # return the constructed network architecture
     return model
@@ -215,8 +218,105 @@ if not data:
 data = np.array(data, dtype="float32")
 labels = np.array(labels, dtype="float32")
 
+
+# Define a flag to switch between 'x' and 'xy' learning
+LEARN_MODE = 'x'  # Options: 'x' or 'xy'
+
+# Adjust labels based on the learning mode
+if LEARN_MODE == 'x':
+    labels = labels[:, 0:1]  # Keep only the x values
+elif LEARN_MODE == 'xy':
+    labels = labels[:, 0:2]  # Keep both x and y values
+else:
+    raise ValueError("Invalid LEARN_MODE. Choose 'x' or 'xy'.")
+
+# Modify the CNN construction function to handle the output size dynamically
+def build_CNN(width, height, depth, activation='relu', dropout=0.25, output_size=2):
+    # initialize the model
+    model = Sequential()
+    inputShape = (height, width, depth)
+
+    # After Keras 2.3 we need an Input layer instead of passing it as a parameter to the first layer
+    model.add(Input(inputShape))
+
+    # Adding normalization - applied per-sample across the feature dimension (channels)
+    model.add(LayerNormalization())
+
+    # Input: 3@66x200 (height=66, width=200, depth=3)
+
+    # --- Convolutional Layers ---
+    # Note: Output dimensions calculated based on input (66, 200)
+    # Formula: floor((Input - Kernel + 2*Padding) / Stride) + 1
+    # With padding='valid', Padding=0
+
+    # Layer 1: Conv(5x5, S=2x2, P=valid) + Activation + Dropout -> Output: 24@31x98
+    model.add(Conv2D(24, (5, 5), strides=(2, 2), activation=activation, padding="valid"))
+    model.add(Dropout(dropout))
+
+    # Layer 2: Conv(5x5, S=2x2, P=valid) + Activation + Dropout -> Output: 36@14x47
+    model.add(Conv2D(36, (5, 5), strides=(2, 2), activation=activation, padding="valid"))
+    model.add(Dropout(dropout))
+
+    # Layer 3: Conv(5x5, S=2x2, P=valid) + Activation + Dropout -> Output: 48@5x22
+    model.add(Conv2D(48, (5, 5), strides=(2, 2), activation=activation, padding="valid"))
+    model.add(Dropout(dropout))
+
+    # Layer 4: Conv(3x3, S=1x1, P=valid) + Activation + Dropout -> Output: 64@3x20
+    model.add(Conv2D(64, (3, 3), strides=(1, 1), activation=activation, padding="valid"))
+    model.add(Dropout(dropout))
+
+    # Layer 5: Conv(3x3, S=1x1, P=valid) + Activation + Dropout -> Output: 64@1x18
+    model.add(Conv2D(64, (3, 3), strides=(1, 1), activation=activation, padding="valid"))
+    model.add(Dropout(dropout))
+
+
+    # --- Fully Connected Layers ---
+    model.add(Flatten())
+
+    # 1st set of FC -> RELU layers + Dropout
+    model.add(Dense(100))
+    model.add(Activation('relu'))
+    model.add(Dropout(dropout))
+
+    # 2nd set of FC -> RELU layers + Dropout
+    model.add(Dense(50))
+    model.add(Activation('relu'))
+    model.add(Dropout(dropout))
+
+    # 3rd set of FC -> RELU layers + Dropout
+    model.add(Dense(10))
+    model.add(Activation('relu'))
+    model.add(Dropout(dropout))
+
+    # Output layer
+    model.add(Dense(output_size))
+
+    return model
+
+# Update the model instantiation to use the LEARN_MODE flag
+output_size = 1 if LEARN_MODE == 'x' else 2
+model = build_CNN(width=image_size["width"], height=image_size["height"], depth=3, dropout=DROPOUT_RATE, output_size=output_size)
+
+
+# Extract the x values from the labels array
+all_x = labels[:, 0]  # Assuming labels is a 2D array where the first column is `x` and the second is `y`
+
+# Example: 21 equal-width bins in the interval [-1.0, +1.0]
+bins   = np.linspace(-1, 1, 22)
+bucket = np.digitize(all_x, bins)
+
+# pick at most N images per bucket
+balanced_idx = []
+for b in np.unique(bucket):
+    idx = np.where(bucket == b)[0]
+    balanced_idx.extend( np.random.choice(idx, min(len(idx), 400)) )  # 400≈sqrt(2000)
+
+data   = data[balanced_idx]
+labels = labels[balanced_idx, 0:1]      # keep only x (see next point)
+
+
 # --- Split data ---
-# partition the data into training and testing splits using 75% of
+# Partition the data into training and testing splits using 75% of
 # the data for training and the remaining 25% for testing
 (trainX, testX, trainY, testY) = train_test_split(data, labels,
     test_size=0.25, random_state=42) # Use the same random_state for reproducibility
@@ -229,15 +329,16 @@ print(f"[INFO] Data split complete. Training samples: {len(trainX)}, Test sample
 
 
 
+
 ############### Training the model ###############
 
 # --- Model Compilation and Training ---
 print("[INFO] compiling model...")
 # Define hyperparameters
-LEARNING_RATE = 1e-3
+LEARNING_RATE = 3e-4 #1e-3
 EPOCHS = 50
 BATCH_SIZE = 32
-DROPOUT_RATE = 0.25
+DROPOUT_RATE = 0.1
 
 # Build the model (3 layer, RGB)
 model = build_CNN(width=image_size["width"], height=image_size["height"], depth=3, dropout=DROPOUT_RATE)
@@ -258,8 +359,9 @@ lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min
 checkpoint_filepath = os.path.join("..", "network_model", "best_model.keras")
 checkpoint = ModelCheckpoint(checkpoint_filepath, monitor='val_loss', save_best_only=True, verbose=1)
 
-# callbacks
-callbacks_list=[lr_scheduler, checkpoint]
+# Add EarlyStopping to callbacks
+early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True, verbose=1)
+callbacks_list=[lr_scheduler, checkpoint, early_stopping]
 
 print("[INFO] training network...")
 # Ensure data types are correct (TensorFlow prefers float32)
