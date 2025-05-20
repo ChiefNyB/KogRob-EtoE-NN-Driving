@@ -346,7 +346,7 @@ model = build_CNN(width=image_size["width"], height=image_size["height"], depth=
 # Compile the model for regression
 opt = Adam(learning_rate=LEARNING_RATE)
 # Using Mean Squared Error loss, add Mean Absolute Error for interpretability
-model.compile(loss="mse", optimizer=opt, metrics=["mae", "mse"])
+model.compile(loss="mse", optimizer=opt, metrics=["mae"])
 
 # Print model summary
 model.summary()
