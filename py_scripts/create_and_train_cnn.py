@@ -1,5 +1,4 @@
-
-# import the necessary packages
+#!/usr/bin/env python3
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Activation, Flatten, Dense, Conv2D, MaxPooling2D, Input, Dropout, LayerNormalization
 from tensorflow.keras.preprocessing.image import img_to_array
@@ -19,7 +18,14 @@ import matplotlib.pyplot as plt
 from numpy.random import seed
 import sys
 from collections import Counter
+import re  # Add import for regular expressions
 LEARN_MODE = 'x'  # Options: 'x' or 'xy'
+# Define hyperparameters
+OUTPUT_SIZE = 1 if LEARN_MODE == 'x' else 2
+LEARNING_RATE = 3e-4 #1e-3
+EPOCHS = 50
+BATCH_SIZE = 32
+DROPOUT_RATE = 0.1
 
 
 
@@ -60,10 +66,10 @@ else:
 ############ CNN construction ############
 
 
-# Model structure taken from: https://developer.nvidia.com/blog/deep-learning-self-driving-cars/
-def build_CNN(width, height, depth, activation='relu', dropout=0.25, output_size=2):
-
-    # initialize the model
+# Consolidate the `build_CNN` function to handle `output_size` dynamically based on `LEARN_MODE`.
+def build_CNN(width, height, depth, activation='relu', dropout=DROPOUT_RATE, output_size=OUTPUT_SIZE):
+ 
+    # Initialize the model
     model = Sequential()
     inputShape = (height, width, depth)
 
@@ -130,7 +136,13 @@ def build_CNN(width, height, depth, activation='relu', dropout=0.25, output_size
 ############# Training data preparation ############
 
 
-dataset = os.path.join('..', 'labelled_data')
+# Adjust dataset path to ensure it points to the source folder
+if 'install' in os.path.dirname(__file__):
+    dataset = re.sub(r"/install/.*", "/src/KogRob-EtoE-NN-Driving/labelled_data", os.path.dirname(__file__))
+else:
+    dataset = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'labelled_data'))
+
+print(f"[INFO] Dataset path: {dataset}")
 # initialize the data and labels
 print("[INFO] loading images and labels...")
 data = []
@@ -138,7 +150,10 @@ labels = [] # Will store lists of [x_val, y_val]
 
 try:
     # grab the image paths and randomly shuffle them
-    imagePaths = sorted(list(paths.list_images(dataset)))
+    # Recursively grab all image paths under the labelled_data directory
+    imagePaths = [os.path.join(root, file) 
+                  for root, _, files in os.walk(dataset) 
+                  for file in files if file.lower().endswith(('.png', '.jpg', '.jpeg'))]
     random.shuffle(imagePaths)
 except:
     print(f"[ERROR] Could not load images from {dataset}. Exiting.")
@@ -218,9 +233,32 @@ if not data:
 data = np.array(data, dtype="float32")
 labels = np.array(labels, dtype="float32")
 
+# --- balance by steering bins ---------------------------------------
+if LEARN_MODE == 'x':                      # only needed for x-training
+    steering = labels[:, 0]
+    bins     = np.linspace(-1.0, 1.0, 22)  # 21 equal-width bins
+    bucket   = np.digitize(steering, bins)
 
-# Define a flag to switch between 'x' and 'xy' learning
-LEARN_MODE = 'x'  # Options: 'x' or 'xy'
+    MAX_PER_BIN = 400                      # keep ≤400 images per bin
+    keep_idx = []
+    for b in np.unique(bucket):
+        idx = np.where(bucket == b)[0]
+        keep_idx.extend(np.random.choice(idx,
+                                         min(len(idx), MAX_PER_BIN),
+                                         replace=False))
+    data   = data[keep_idx]
+    labels = labels[keep_idx]
+
+    # --- optional left/right flip augmentation --------------------------
+# duplicates the dataset and inverts the steering sign
+DO_FLIP = False           # set True to enable
+if DO_FLIP:
+    flipped_imgs   = data[:, ::-1, :, :]                 # HWC, flip x-axis
+    flipped_labels = np.copy(labels)
+    flipped_labels[:, 0] *= -1                          # invert steering
+    data   = np.concatenate([data,   flipped_imgs],   axis=0)
+    labels = np.concatenate([labels, flipped_labels], axis=0)
+# --------------------------------------------------------------------
 
 # Adjust labels based on the learning mode
 if LEARN_MODE == 'x':
@@ -229,90 +267,6 @@ elif LEARN_MODE == 'xy':
     labels = labels[:, 0:2]  # Keep both x and y values
 else:
     raise ValueError("Invalid LEARN_MODE. Choose 'x' or 'xy'.")
-
-# Modify the CNN construction function to handle the output size dynamically
-def build_CNN(width, height, depth, activation='relu', dropout=0.25, output_size=2):
-    # initialize the model
-    model = Sequential()
-    inputShape = (height, width, depth)
-
-    # After Keras 2.3 we need an Input layer instead of passing it as a parameter to the first layer
-    model.add(Input(inputShape))
-
-    # Adding normalization - applied per-sample across the feature dimension (channels)
-    model.add(LayerNormalization())
-
-    # Input: 3@66x200 (height=66, width=200, depth=3)
-
-    # --- Convolutional Layers ---
-    # Note: Output dimensions calculated based on input (66, 200)
-    # Formula: floor((Input - Kernel + 2*Padding) / Stride) + 1
-    # With padding='valid', Padding=0
-
-    # Layer 1: Conv(5x5, S=2x2, P=valid) + Activation + Dropout -> Output: 24@31x98
-    model.add(Conv2D(24, (5, 5), strides=(2, 2), activation=activation, padding="valid"))
-    model.add(Dropout(dropout))
-
-    # Layer 2: Conv(5x5, S=2x2, P=valid) + Activation + Dropout -> Output: 36@14x47
-    model.add(Conv2D(36, (5, 5), strides=(2, 2), activation=activation, padding="valid"))
-    model.add(Dropout(dropout))
-
-    # Layer 3: Conv(5x5, S=2x2, P=valid) + Activation + Dropout -> Output: 48@5x22
-    model.add(Conv2D(48, (5, 5), strides=(2, 2), activation=activation, padding="valid"))
-    model.add(Dropout(dropout))
-
-    # Layer 4: Conv(3x3, S=1x1, P=valid) + Activation + Dropout -> Output: 64@3x20
-    model.add(Conv2D(64, (3, 3), strides=(1, 1), activation=activation, padding="valid"))
-    model.add(Dropout(dropout))
-
-    # Layer 5: Conv(3x3, S=1x1, P=valid) + Activation + Dropout -> Output: 64@1x18
-    model.add(Conv2D(64, (3, 3), strides=(1, 1), activation=activation, padding="valid"))
-    model.add(Dropout(dropout))
-
-
-    # --- Fully Connected Layers ---
-    model.add(Flatten())
-
-    # 1st set of FC -> RELU layers + Dropout
-    model.add(Dense(100))
-    model.add(Activation('relu'))
-    model.add(Dropout(dropout))
-
-    # 2nd set of FC -> RELU layers + Dropout
-    model.add(Dense(50))
-    model.add(Activation('relu'))
-    model.add(Dropout(dropout))
-
-    # 3rd set of FC -> RELU layers + Dropout
-    model.add(Dense(10))
-    model.add(Activation('relu'))
-    model.add(Dropout(dropout))
-
-    # Output layer
-    model.add(Dense(output_size))
-
-    return model
-
-# Update the model instantiation to use the LEARN_MODE flag
-output_size = 1 if LEARN_MODE == 'x' else 2
-model = build_CNN(width=image_size["width"], height=image_size["height"], depth=3, dropout=DROPOUT_RATE, output_size=output_size)
-
-
-# Extract the x values from the labels array
-all_x = labels[:, 0]  # Assuming labels is a 2D array where the first column is `x` and the second is `y`
-
-# Example: 21 equal-width bins in the interval [-1.0, +1.0]
-bins   = np.linspace(-1, 1, 22)
-bucket = np.digitize(all_x, bins)
-
-# pick at most N images per bucket
-balanced_idx = []
-for b in np.unique(bucket):
-    idx = np.where(bucket == b)[0]
-    balanced_idx.extend( np.random.choice(idx, min(len(idx), 400)) )  # 400≈sqrt(2000)
-
-data   = data[balanced_idx]
-labels = labels[balanced_idx, 0:1]      # keep only x (see next point)
 
 
 # --- Split data ---
@@ -334,11 +288,11 @@ print(f"[INFO] Data split complete. Training samples: {len(trainX)}, Test sample
 
 # --- Model Compilation and Training ---
 print("[INFO] compiling model...")
-# Define hyperparameters
-LEARNING_RATE = 3e-4 #1e-3
-EPOCHS = 50
-BATCH_SIZE = 32
-DROPOUT_RATE = 0.1
+# # Define hyperparameters
+# LEARNING_RATE = 3e-4 #1e-3
+# EPOCHS = 50
+# BATCH_SIZE = 32
+# DROPOUT_RATE = 0.1
 
 # Build the model (3 layer, RGB)
 model = build_CNN(width=image_size["width"], height=image_size["height"], depth=3, dropout=DROPOUT_RATE)
@@ -346,21 +300,24 @@ model = build_CNN(width=image_size["width"], height=image_size["height"], depth=
 # Compile the model for regression
 opt = Adam(learning_rate=LEARNING_RATE)
 # Using Mean Squared Error loss, add Mean Absolute Error for interpretability
-model.compile(loss="mse", optimizer=opt, metrics=["mae"])
+model.compile(loss="mse", optimizer=opt, metrics=["mae", "mse"])
 
 # Print model summary
 model.summary()
 
+# callbacks
+METRIC = 'val_mae'      
+
 # Reduce learning rate when a metric has stopped improving
 # Monitor 'val_loss' which is generally preferred over training loss
-lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
+lr_scheduler = ReduceLROnPlateau(monitor=METRIC, factor=0.5, patience=5, min_lr=1e-6, verbose=1)
 
 # Save the best model based on validation loss
 checkpoint_filepath = os.path.join("..", "network_model", "best_model.keras")
-checkpoint = ModelCheckpoint(checkpoint_filepath, monitor='val_loss', save_best_only=True, verbose=1)
+checkpoint = ModelCheckpoint(checkpoint_filepath, monitor=METRIC, save_best_only=True, verbose=1)
 
 # Add EarlyStopping to callbacks
-early_stopping = EarlyStopping(monitor='val_loss', patience=10, restore_best_weights=True, verbose=1)
+early_stopping = EarlyStopping(monitor=METRIC, patience=10, restore_best_weights=True, verbose=1)
 callbacks_list=[lr_scheduler, checkpoint, early_stopping]
 
 print("[INFO] training network...")
@@ -374,7 +331,7 @@ H = model.fit(trainX.astype('float32'), trainY.astype('float32'),
 last_model_filepath = os.path.join("..", "network_model", "last_model.keras")
 model.save(last_model_filepath)
 print(f"[INFO] Last model saved to {last_model_filepath}")
-print(f"[INFO] Best model saved to {checkpoint_filepath} (based on val_loss)")
+print(f"[INFO] Best model saved to {checkpoint_filepath} (based on {METRIC})")
 
 
 print("[INFO] evaluating network using the best saved model...")
@@ -392,7 +349,7 @@ if os.path.exists(checkpoint_filepath):
         print("[INFO] plotting training history...")
         plt.style.use("ggplot")
         plt.figure()
-        N = EPOCHS
+        N = len(H.history["loss"])     
         plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
         plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
         plt.plot(np.arange(0, N), H.history["mae"], label="train_mae")
