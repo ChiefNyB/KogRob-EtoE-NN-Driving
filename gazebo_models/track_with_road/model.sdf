@@ -23,7 +23,7 @@
         <pose>0 0 0 0 -0 0</pose>
         <geometry>
           <mesh>
-            <uri>model://track_with_road/meshes/track_with_road</uri>
+            <uri>model://track_with_road/meshes/track_with_road.dae</uri>
             <scale>1 1 1</scale>
           </mesh>
         </geometry>
@@ -36,7 +36,7 @@
         <pose>0 0 0 0 -0 0</pose>
         <geometry>
           <mesh>
-            <uri>model://track_with_road/meshes/track_with_road</uri>
+            <uri>model://track_with_road/meshes/track_with_road.dae</uri>
             <scale>1 1 1</scale>
           </mesh>
         </geometry>
