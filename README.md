@@ -1,6 +1,13 @@
 # KogRob: Robot control with end-to-end neural network
  
-Based on ROS2 Jazzy and Gazebo Harmonic.
+This project aims to implement a turtlebot3 driven by a CNN which reads images of the robot's camera, and outputs velocity commands to control the turtlebot3.
+For this project ROS2 Jazzy and Gazebo Harmonic were used.
+
+Created by:
+- Miklós Balázs
+- Kristóf Bányi
+- Ádám Szakmári
+- Barnabás Nyuli
 
 ## 1. Install and setup
 
