@@ -66,6 +66,8 @@ else:
 ############ CNN construction ############
 
 
+# Model structure taken from: https://developer.nvidia.com/blog/deep-learning-self-driving-cars/
+
 # Consolidate the `build_CNN` function to handle `output_size` dynamically based on `LEARN_MODE`.
 def build_CNN(width, height, depth, activation='relu', dropout=DROPOUT_RATE, output_size=OUTPUT_SIZE):
  
@@ -251,7 +253,7 @@ if LEARN_MODE == 'x':                      # only needed for x-training
 
     # --- optional left/right flip augmentation --------------------------
 # duplicates the dataset and inverts the steering sign
-DO_FLIP = False           # set True to enable
+DO_FLIP = True           # set True to enable
 if DO_FLIP:
     flipped_imgs   = data[:, ::-1, :, :]                 # HWC, flip x-axis
     flipped_labels = np.copy(labels)
@@ -365,6 +367,39 @@ if os.path.exists(checkpoint_filepath):
 else:
     print(f"[WARNING] Best model file not found at {checkpoint_filepath}. Skipping evaluation and plotting.")
 
+# ─── Plot predictions vs ground truth ──────────────────────────────
+
+# Predict on test set
+predictions = model.predict(testX, batch_size=BATCH_SIZE)
+
+# Check output shape to determine if we're in 'x' or 'xy' mode
+if predictions.shape[1] == 1:
+    true_vals = testY[:, 0]
+    pred_vals = predictions[:, 0]
+    label_name = 'x'
+elif predictions.shape[1] == 2:
+    true_vals = testY[:, 0]
+    pred_vals = predictions[:, 0]  # you can also visualize y if you want
+    label_name = 'x (first output)'
+else:
+    raise ValueError("Unexpected output shape from model prediction.")
+
+# Sort the samples by true value to show "linearity"
+sort_idx = np.argsort(true_vals)
+sorted_true = true_vals[sort_idx]
+sorted_pred = pred_vals[sort_idx]
+
+plt.figure(figsize=(10, 5))
+plt.plot(sorted_true, label='Ground Truth', linewidth=2, color='tomato')
+plt.plot(sorted_pred, label='Predicted', linestyle='--', linewidth=2, color='dodgerblue')
+plt.fill_between(np.arange(len(sorted_true)), sorted_true, sorted_pred, color='orange', alpha=0.3, label='Error')
+plt.title(f"Prediction vs Ground Truth (sorted) – Output: {label_name}")
+plt.xlabel("Sorted Sample Index")
+plt.ylabel(label_name)
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
 
 print("[INFO] Script finished.")

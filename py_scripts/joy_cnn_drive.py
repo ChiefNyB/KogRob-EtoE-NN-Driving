@@ -24,7 +24,7 @@ DEFAULTS = {
     "image_height": 66,
     "camera_topic": "image_raw",
     "publish_topic": "joy_xy",
-    "constant_speed": 0.1,
+    "constant_speed": 0.2,
     "force_cpu": False,
     # GUI / visualisation
     "display_camera": True,
@@ -111,7 +111,7 @@ class JoyCNNDrive(Node):
         self.pub = self.create_publisher(Float32MultiArray, publish_topic, 10)
 
         # ───────────── state / GUI initialisation ────────────────
-        self.running = True
+        self.running = False
         self._frame_lock = Lock()
         self._frame: Optional[Any] = None  # latest BGR for GUI
         self._frame_idx = 0
