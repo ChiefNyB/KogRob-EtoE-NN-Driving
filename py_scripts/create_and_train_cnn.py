@@ -1,9 +1,9 @@
-# import the necessary packages
+#!/usr/bin/env python3
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Activation, Flatten, Dense, Conv2D, MaxPooling2D, Input, Dropout, LayerNormalization
 from tensorflow.keras.preprocessing.image import img_to_array
 from tensorflow.keras.optimizers import Adam
-from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint
+from tensorflow.keras.callbacks import ReduceLROnPlateau, ModelCheckpoint, EarlyStopping
 from tensorflow.keras import __version__ as keras_version
 from tensorflow.keras.models import load_model
 from tensorflow.random import set_seed
@@ -17,6 +17,15 @@ import os
 import matplotlib.pyplot as plt
 from numpy.random import seed
 import sys
+from collections import Counter
+import re  # Add import for regular expressions
+LEARN_MODE = 'x'  # Options: 'x' or 'xy'
+# Define hyperparameters
+OUTPUT_SIZE = 1 if LEARN_MODE == 'x' else 2
+LEARNING_RATE = 3e-4 #1e-3
+EPOCHS = 50
+BATCH_SIZE = 32
+DROPOUT_RATE = 0.1
 
 
 
@@ -58,9 +67,11 @@ else:
 
 
 # Model structure taken from: https://developer.nvidia.com/blog/deep-learning-self-driving-cars/
-def build_CNN(width, height, depth, activation='relu', dropout=0.25):
 
-    # initialize the model
+# Consolidate the `build_CNN` function to handle `output_size` dynamically based on `LEARN_MODE`.
+def build_CNN(width, height, depth, activation='relu', dropout=DROPOUT_RATE, output_size=OUTPUT_SIZE):
+ 
+    # Initialize the model
     model = Sequential()
     inputShape = (height, width, depth)
 
@@ -116,8 +127,8 @@ def build_CNN(width, height, depth, activation='relu', dropout=0.25):
     model.add(Activation('relu'))
     model.add(Dropout(dropout))
 
-    # XY output (X:forward-backward, Y:left-right)
-    model.add(Dense(2))
+    # Output layer
+    model.add(Dense(output_size))
 
     # return the constructed network architecture
     return model
@@ -127,7 +138,13 @@ def build_CNN(width, height, depth, activation='relu', dropout=0.25):
 ############# Training data preparation ############
 
 
-dataset = os.path.join('..', 'labelled_data')
+# Adjust dataset path to ensure it points to the source folder
+if 'install' in os.path.dirname(__file__):
+    dataset = re.sub(r"/install/.*", "/src/KogRob-EtoE-NN-Driving/labelled_data", os.path.dirname(__file__))
+else:
+    dataset = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'labelled_data'))
+
+print(f"[INFO] Dataset path: {dataset}")
 # initialize the data and labels
 print("[INFO] loading images and labels...")
 data = []
@@ -135,7 +152,10 @@ labels = [] # Will store lists of [x_val, y_val]
 
 try:
     # grab the image paths and randomly shuffle them
-    imagePaths = sorted(list(paths.list_images(dataset)))
+    # Recursively grab all image paths under the labelled_data directory
+    imagePaths = [os.path.join(root, file) 
+                  for root, _, files in os.walk(dataset) 
+                  for file in files if file.lower().endswith(('.png', '.jpg', '.jpeg'))]
     random.shuffle(imagePaths)
 except:
     print(f"[ERROR] Could not load images from {dataset}. Exiting.")
@@ -215,8 +235,44 @@ if not data:
 data = np.array(data, dtype="float32")
 labels = np.array(labels, dtype="float32")
 
+# --- balance by steering bins ---------------------------------------
+if LEARN_MODE == 'x':                      # only needed for x-training
+    steering = labels[:, 0]
+    bins     = np.linspace(-1.0, 1.0, 22)  # 21 equal-width bins
+    bucket   = np.digitize(steering, bins)
+
+    MAX_PER_BIN = 400                      # keep ≤400 images per bin
+    keep_idx = []
+    for b in np.unique(bucket):
+        idx = np.where(bucket == b)[0]
+        keep_idx.extend(np.random.choice(idx,
+                                         min(len(idx), MAX_PER_BIN),
+                                         replace=False))
+    data   = data[keep_idx]
+    labels = labels[keep_idx]
+
+    # --- optional left/right flip augmentation --------------------------
+# duplicates the dataset and inverts the steering sign
+DO_FLIP = True           # set True to enable
+if DO_FLIP:
+    flipped_imgs   = data[:, ::-1, :, :]                 # HWC, flip x-axis
+    flipped_labels = np.copy(labels)
+    flipped_labels[:, 0] *= -1                          # invert steering
+    data   = np.concatenate([data,   flipped_imgs],   axis=0)
+    labels = np.concatenate([labels, flipped_labels], axis=0)
+# --------------------------------------------------------------------
+
+# Adjust labels based on the learning mode
+if LEARN_MODE == 'x':
+    labels = labels[:, 0:1]  # Keep only the x values
+elif LEARN_MODE == 'xy':
+    labels = labels[:, 0:2]  # Keep both x and y values
+else:
+    raise ValueError("Invalid LEARN_MODE. Choose 'x' or 'xy'.")
+
+
 # --- Split data ---
-# partition the data into training and testing splits using 75% of
+# Partition the data into training and testing splits using 75% of
 # the data for training and the remaining 25% for testing
 (trainX, testX, trainY, testY) = train_test_split(data, labels,
     test_size=0.25, random_state=42) # Use the same random_state for reproducibility
@@ -229,15 +285,16 @@ print(f"[INFO] Data split complete. Training samples: {len(trainX)}, Test sample
 
 
 
+
 ############### Training the model ###############
 
 # --- Model Compilation and Training ---
 print("[INFO] compiling model...")
-# Define hyperparameters
-LEARNING_RATE = 1e-3
-EPOCHS = 50
-BATCH_SIZE = 32
-DROPOUT_RATE = 0.25
+# # Define hyperparameters
+# LEARNING_RATE = 3e-4 #1e-3
+# EPOCHS = 50
+# BATCH_SIZE = 32
+# DROPOUT_RATE = 0.1
 
 # Build the model (3 layer, RGB)
 model = build_CNN(width=image_size["width"], height=image_size["height"], depth=3, dropout=DROPOUT_RATE)
@@ -250,16 +307,20 @@ model.compile(loss="mse", optimizer=opt, metrics=["mae", "mse"])
 # Print model summary
 model.summary()
 
+# callbacks
+METRIC = 'val_mae'      
+
 # Reduce learning rate when a metric has stopped improving
 # Monitor 'val_loss' which is generally preferred over training loss
-lr_scheduler = ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=5, min_lr=1e-6, verbose=1)
+lr_scheduler = ReduceLROnPlateau(monitor=METRIC, factor=0.5, patience=5, min_lr=1e-6, verbose=1)
 
 # Save the best model based on validation loss
 checkpoint_filepath = os.path.join("..", "network_model", "best_model.keras")
-checkpoint = ModelCheckpoint(checkpoint_filepath, monitor='val_loss', save_best_only=True, verbose=1)
+checkpoint = ModelCheckpoint(checkpoint_filepath, monitor=METRIC, save_best_only=True, verbose=1)
 
-# callbacks
-callbacks_list=[lr_scheduler, checkpoint]
+# Add EarlyStopping to callbacks
+early_stopping = EarlyStopping(monitor=METRIC, patience=10, restore_best_weights=True, verbose=1)
+callbacks_list=[lr_scheduler, checkpoint, early_stopping]
 
 print("[INFO] training network...")
 # Ensure data types are correct (TensorFlow prefers float32)
@@ -272,7 +333,7 @@ H = model.fit(trainX.astype('float32'), trainY.astype('float32'),
 last_model_filepath = os.path.join("..", "network_model", "last_model.keras")
 model.save(last_model_filepath)
 print(f"[INFO] Last model saved to {last_model_filepath}")
-print(f"[INFO] Best model saved to {checkpoint_filepath} (based on val_loss)")
+print(f"[INFO] Best model saved to {checkpoint_filepath} (based on {METRIC})")
 
 
 print("[INFO] evaluating network using the best saved model...")
@@ -290,7 +351,7 @@ if os.path.exists(checkpoint_filepath):
         print("[INFO] plotting training history...")
         plt.style.use("ggplot")
         plt.figure()
-        N = EPOCHS
+        N = len(H.history["loss"])     
         plt.plot(np.arange(0, N), H.history["loss"], label="train_loss")
         plt.plot(np.arange(0, N), H.history["val_loss"], label="val_loss")
         plt.plot(np.arange(0, N), H.history["mae"], label="train_mae")
@@ -306,6 +367,39 @@ if os.path.exists(checkpoint_filepath):
 else:
     print(f"[WARNING] Best model file not found at {checkpoint_filepath}. Skipping evaluation and plotting.")
 
+# ─── Plot predictions vs ground truth ──────────────────────────────
+
+# Predict on test set
+predictions = model.predict(testX, batch_size=BATCH_SIZE)
+
+# Check output shape to determine if we're in 'x' or 'xy' mode
+if predictions.shape[1] == 1:
+    true_vals = testY[:, 0]
+    pred_vals = predictions[:, 0]
+    label_name = 'x'
+elif predictions.shape[1] == 2:
+    true_vals = testY[:, 0]
+    pred_vals = predictions[:, 0]  # you can also visualize y if you want
+    label_name = 'x (first output)'
+else:
+    raise ValueError("Unexpected output shape from model prediction.")
+
+# Sort the samples by true value to show "linearity"
+sort_idx = np.argsort(true_vals)
+sorted_true = true_vals[sort_idx]
+sorted_pred = pred_vals[sort_idx]
+
+plt.figure(figsize=(10, 5))
+plt.plot(sorted_true, label='Ground Truth', linewidth=2, color='tomato')
+plt.plot(sorted_pred, label='Predicted', linestyle='--', linewidth=2, color='dodgerblue')
+plt.fill_between(np.arange(len(sorted_true)), sorted_true, sorted_pred, color='orange', alpha=0.3, label='Error')
+plt.title(f"Prediction vs Ground Truth (sorted) – Output: {label_name}")
+plt.xlabel("Sorted Sample Index")
+plt.ylabel(label_name)
+plt.legend()
+plt.grid(True)
+plt.tight_layout()
+plt.show()
 
 
 print("[INFO] Script finished.")

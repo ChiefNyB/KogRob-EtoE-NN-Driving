@@ -49,7 +49,7 @@ def generate_launch_description():
     )
 
     y_pose_arg = DeclareLaunchArgument(
-        'y_pose', default_value='0.0',
+        'y_pose', default_value='-0.25',
         description='y coordinate of spawned robot'
     )
 
@@ -64,7 +64,8 @@ def generate_launch_description():
     )
 
     world_arg = DeclareLaunchArgument(
-        'world', default_value='light_background.sdf',
+        #'world', default_value='light_background.sdf',
+        'world', default_value='track_with_road.sdf',
         description='Name of the Gazebo world file to load'
     )
 
@@ -133,6 +134,19 @@ def generate_launch_description():
         name='mogi_trajectory_server',
     )
 
+    # # Override robot pose for track_with_road.sdf world
+    # x_pose_override = DeclareLaunchArgument(
+    #     'x_pose',
+    #     default_value=LaunchConfiguration('x_pose') if LaunchConfiguration('world') != 'track_with_road.sdf' else '0.0',
+    #     description='x coordinate of spawned robot (overridden for track_with_road.sdf)'
+    # )
+
+    # y_pose_override = DeclareLaunchArgument(
+    #     'y_pose',
+    #     default_value=LaunchConfiguration('y_pose') if LaunchConfiguration('world') != 'track_with_road.sdf' else '-1.0',
+    #     description='y coordinate of spawned robot (overridden for track_with_road.sdf)'
+    # )
+
     ld = LaunchDescription()
 
     # Add the commands to the launch description
@@ -150,5 +164,9 @@ def generate_launch_description():
     ld.add_action(spawn_turtlebot_cmd)
     ld.add_action(rviz_node)
     ld.add_action(trajectory_node)
+    # ld.add_action(x_pose_override)
+    # ld.add_action(y_pose_override)
+    ld.add_action(x_pose_arg)
+    ld.add_action(y_pose_arg)
 
     return ld
