@@ -1,6 +1,7 @@
 # KogRob: Robot control with end-to-end neural network
  
 This project aims to implement a turtlebot3 driven by a CNN which reads images of the robot's camera, and outputs velocity commands to control the turtlebot3.
+The foundation of the concepts and the network architecture was [this](https://developer.nvidia.com/blog/deep-learning-self-driving-cars/) NVIDIA project.
 For this project ROS2 Jazzy and Gazebo Harmonic were used.
 
 Created by:
@@ -8,6 +9,7 @@ Created by:
 - Kristóf Bányi
 - Ádám Szakmári
 - Barnabás Nyuli
+
 
 ## 1. Install and setup
 
@@ -83,10 +85,18 @@ ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
 
 ### Labelled data acquisition
 
-To collect training data, recorded images paired with the corresponding joystick commands are saved. The `image_recorder` node is responsible for doing so. It is recording images with 10FPS as in the example project.
+To collect training data, recorded images paired with the corresponding joystick commands are saved. The `image_recorder` node is responsible for doing so. 
 
-For utilising, make sure messages are being published on the `/image_raw/compressed` topic (from the camera) and the `/joy_xy` topic (from the `joy_teleop_manual.launch.py` or a similar source).
-Open a new terminal and run the node:
+This node subscribes to the `/image_raw/compressed` topic (from the camera) and the `/joy_xy` topic (from the `joy_teleop_manual.launch.py` or a similar source).
+When recording is active, the node receives images (downsampled to 10 FPS) and velocity commands in queues and pairs the closest ones together based on their arrival of the messages (ROS time).
+If there are no velocity command matches for an image within a specified time, the image will not be saved. 
+Also images will only be saved only if either the X or Y joystick value (or both) is non-zero to avoid saving images when the robot is stationary.
+
+The training images are saved under the `labelled_data` folder within the package with a name similar to this: `20250521_201012_401_Xn0p500_Y0p860.jpg`
+Here the first part shows the record date and time when the image was captured, and the numbers after `X` and `Y` represent the normalized angular (left-right) and linear (forward-backward) speed.
+For easy file handling, the `.` and `-` symbols are exchanged for `p` and `n`. So in the example above an image was captured with `X: -0.500` and `Y: 0.860` values received on the joystick's topic.
+
+The node can be started by running the following command:
 
 ```bash
 ros2 run KogRob-EtoE-NN-Driving image_recorder
@@ -94,14 +104,9 @@ ros2 run KogRob-EtoE-NN-Driving image_recorder
 You can control the recording by:
 *   Press the `r` key in the terminal where `image_recorder` is running to **start** recording.
 *   Press `r` again to **stop** recording. You can toggle recording on and off as needed while driving the robot.
-*   Press `q` or Ctrl+C to **quit** the recorder node gracefully.
-
-When recording is active, the node listens for synchronized image and joystick messages. It will save the compressed image **only if either the X or Y joystick value (or both) is non-zero**. This avoids saving images when the robot is stationary.
+*   Press `q` or `Ctrl+C` to **quit** the recorder node gracefully.
 
 
-The training images are saved under the folder```labelled_data``` with a name similar to this: ```..._Xn0p500_Y0p860.png```
-
-Here the number after ```Y``` represents the normalized linear (forward-backward) speed (in this case: -0.5), while the number after ```X``` denotes the normalized angular (left-right) speed (in this example: 0.86).
 
 The ```image_recorder``` node can be used in an altered mode, when listening to the ```\cmd_vel``` topic instead of ```\joy_xy``` . It is intended for testing and debug purposes only:
 ```bash
@@ -109,31 +114,75 @@ ros2 run KogRob-EtoE-NN-Driving image_recorder --ros-args -p use_cmd_vel:=True
 ```
 
 ### Neural network creation and teaching
+
 The origin of the CNN model is NVIDIA's [DAVE-2](https://developer.nvidia.com/blog/deep-learning-self-driving-cars/), with the slight modification of outputting linear and angular speed, instead of giving only the reciprical of the turning radius.
 The network has an input of 200x66 pixels and X and Y outputs.
 
-If a correctly labelled training dataset exists in the directory mentioned above, the CNN can be created and trained by navigating to the ```py_scripts``` directory and running the script:
+If a correctly labelled training dataset exists in the directory mentioned above, the CNN can be created and trained by navigating to the `py_scripts` directory and running the script:
 
 ```bash
 python3 create_and_train_cnn.py
 ```
 The process can be monitored in the terminal, and in case an error happens it is also printed here.
-After a completed training procedure, the test evalution graphs pop-up showing the values of testfitting.
+After a completed training procedure, the test evalution graphs pop-up showing the values of testfitting. The network structure is as follows:
+
+```bash
+┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
+┃ Layer (type)                    ┃ Output Shape           ┃       Param   ┃
+┡━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━━━━━━━━━━╇━━━━━━━━━━━━━━━┩
+│ layer_normalization             │ (None, 66, 200, 3)     │             6 │
+│ (LayerNormalization)            │                        │               │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ conv2d (Conv2D)                 │ (None, 31, 98, 24)     │         1,824 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout (Dropout)               │ (None, 31, 98, 24)     │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ conv2d_1 (Conv2D)               │ (None, 14, 47, 36)     │        21,636 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_1 (Dropout)             │ (None, 14, 47, 36)     │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ conv2d_2 (Conv2D)               │ (None, 5, 22, 48)      │        43,248 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_2 (Dropout)             │ (None, 5, 22, 48)      │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ conv2d_3 (Conv2D)               │ (None, 3, 20, 64)      │        27,712 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_3 (Dropout)             │ (None, 3, 20, 64)      │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ conv2d_4 (Conv2D)               │ (None, 1, 18, 64)      │        36,928 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_4 (Dropout)             │ (None, 1, 18, 64)      │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ flatten (Flatten)               │ (None, 1152)           │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dense (Dense)                   │ (None, 100)            │       115,300 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ activation (Activation)         │ (None, 100)            │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_5 (Dropout)             │ (None, 100)            │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dense_1 (Dense)                 │ (None, 50)             │         5,050 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ activation_1 (Activation)       │ (None, 50)             │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_6 (Dropout)             │ (None, 50)             │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dense_2 (Dense)                 │ (None, 10)             │           510 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ activation_2 (Activation)       │ (None, 10)             │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dropout_7 (Dropout)             │ (None, 10)             │             0 │
+├─────────────────────────────────┼────────────────────────┼───────────────┤
+│ dense_3 (Dense)                 │ (None, 2)              │            22 │
+└─────────────────────────────────┴────────────────────────┴───────────────┘
+ Total params: 252,236 (985.30 KB)
+ Trainable params: 252,236 (985.30 KB)
+ Non-trainable params: 0 (0.00 B)
+
+
+```
 
 ### Applying the trained neural network
 
 
 
-## 3. Error handling
-
-If colcon build fails because of the following error:
-
-```bash
-ModuleNotFoundError: No module named 'catkin_pkg'
-```
-
-Try installing it by running the command:
-
-```bash
-pip install catkin_pkg
-```
