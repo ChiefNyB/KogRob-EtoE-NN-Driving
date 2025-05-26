@@ -17,9 +17,12 @@ For use please install ROS2 Jazzy desktop version and Gazebo Harmonic.
 
 
 Dependencies (beyond ROS2 and Gazebo):
-- MOGI turtlebot3 repositories
+- MOGI TurtleBot3 repositories
 - Python3
-- Some python packages (see later)
+- Some python packages:
+    - cv_bridge
+    - rclpy
+    - sensor_msgs
 - ROS2 joystick interface package
 
 You can add these with cloning the following repositories into the src folder of the workspace:
@@ -28,6 +31,13 @@ You can add these with cloning the following repositories into the src folder of
 git clone -b mogi-ros2 https://github.com/MOGI-ROS/turtlebot3
 git clone -b new_gazebo https://github.com/MOGI-ROS/turtlebot3_simulations
 ```
+
+You should also set the environment variable for the TurtleBot3 Burger model:
+
+```bash
+export TURTLEBOT3_MODEL=burger
+```
+
 And installing the packages below using apt:
 ```bash
 sudo apt install python3-pip
@@ -37,7 +47,7 @@ sudo apt install ros-jazzy-teleop-twist-joy
 sudo apt install ros-jazzy-message-filters
 ```
 
-Set up a Python virtual enviroment, as described [here](https://github.com/MOGI-ROS/Week-1-8-Cognitive-robotics?tab=readme-ov-file#line-following)
+Set up a Python virtual environment, as described [here](https://github.com/MOGI-ROS/Week-1-8-Cognitive-robotics?tab=readme-ov-file#line-following)
 and afterwards install these python packages:
 ```bash
 pip install tensorflow==2.18.0
@@ -68,7 +78,7 @@ Finally, after installing all dependencies, run the ```colcon build``` command i
 
 
 ### Controller
-Manual control of the turtlebot with joystick can be started using the launch file:
+Manual control of the TurtleBot3 with joystick can be started using the launch file:
 ```bash
 ros2 launch KogRob-EtoE-NN-Driving joy_teleop_manual.launch.py
 ```
@@ -78,12 +88,12 @@ You can also drive the robot straight from the /joy_xy topic with the launch fil
 ros2 launch KogRob-EtoE-NN-Driving joy_teleop.launch.py
 ```
 This launch file converts the coordinates in the topic to joy and the twist values and publishes it in /cmd_vel. You can also configure both the joystick teleops in ```config/teleop_joy.yaml```. This file configures mainly the speed of the robot and the joystick selection.\
-You can test the control of the robot with the prepared worlds in the ```turtlebot3_gazebo``` package from the ```turtlebot3_simulations``` repository. An example of a test world and the turtlebot3:
+You can test the control of the robot with the prepared worlds in the ```turtlebot3_gazebo``` package from the ```turtlebot3_simulations``` repository. An example of a test world and the TurtleBot3:
 ```bash
 ros2 launch turtlebot3_gazebo turtlebot3_house.launch.py
 ```
 
-### Labelled data acquisition
+### Labeled data acquisition
 
 To collect training data, recorded images paired with the corresponding joystick commands are saved. The `image_recorder` node is responsible for doing so. 
 
@@ -115,16 +125,11 @@ ros2 run KogRob-EtoE-NN-Driving image_recorder --ros-args -p use_cmd_vel:=True
 
 ### Neural network creation and teaching
 
-The origin of the CNN model is NVIDIA's [DAVE-2](https://developer.nvidia.com/blog/deep-learning-self-driving-cars/), with the slight modification of outputting linear and angular speed, instead of giving only the reciprical of the turning radius.
+The origin of the CNN model is NVIDIA's [DAVE-2](https://developer.nvidia.com/blog/deep-learning-self-driving-cars/), with the slight modification of outputting linear and angular speed, instead of giving only the reciprocal of the turning radius.
 The network has an input of 200x66 pixels and X and Y outputs.
 
-If a correctly labelled training dataset exists in the directory mentioned above, the CNN can be created and trained by navigating to the `py_scripts` directory and running the script:
 
-```bash
-python3 create_and_train_cnn.py
-```
-The process can be monitored in the terminal, and in case an error happens it is also printed here.
-After a completed training procedure, the test evalution graphs pop-up showing the values of testfitting. The network structure is as follows:
+The network structure is as follows:
 
 ```bash
 ┏━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━━━━━━━━━━┳━━━━━━━━━━━━━━━┓
@@ -182,7 +187,104 @@ After a completed training procedure, the test evalution graphs pop-up showing t
 
 ```
 
+If a correctly labelled training dataset exists in the directory mentioned above, the CNN can be created and trained by navigating to the `py_scripts` directory and running the script:
+
+```bash
+python3 create_and_train_cnn.py
+```
+The process can be monitored in the terminal, and in case an error happens it is also printed here.
+
+The script first prints the TensorFlow/Keras version and checks for an available CUDA-capable GPU. If there is, dynamic memory-growth is enabled, otherwise the process automatically falls back to CPU.
+
+#### Data discovery
+
+The script is looking for labeled images in the above-mentioned `<package>/labelled_data`  folder and its subfolders in `.jpg` or `.png` format.
+(Names must embed joystick values, eg: `...x-0p40_y0p25.jpg`!)
+
+
+#### Image processing
+
+To balance the dataset the script divides steering angles into 21 equal-width bins, where each image is assigned. A maximum of 400 images are retained in each bin to prevent over-representation of certain steering angles. If limit the is reached, a random subset is selected.
+
+For further balance of the dataset, a flipping augmentation is applied. This duplicates the dataset by flipping images horizontally and inverting their steering parameter. The dataset is then shuffled to avoiding ordering bias. This augmentation can be turned off by toggling `DO_FLIP = True` to `False`. This method alone can be tested with running:
+```bash
+ros2 run KogRob-EtoE-NN-Driving test_flip
+```
+The node selects picture and flips it, then saves it along with the original with `_original` and `_test` in their names, while printing the original and flipped labels in the terminal.
+
+
+#### Training
+
+After loading and balancing the full image set the data is converted into NumPy array and split 75% / 25% for training and testing.
+
+The script is training only `X` parameters (for steering) by default, but a two output mode is available by setting `LEARN_MODE = 'xy'`. In this mode the model is learning speed control also, though this mode is not yet implemented in the driving node.
+
+##### Hyperparameters
+
+```
+
+| Parameter       | Default Value | Description                                         |
+|-----------------|---------------|-----------------------------------------------------|
+| EPOCHS          | 50            | Upper bound, Early-Stopping might be called earlier |
+| BATCH_SIZE      | 32            | Batch size                                          |
+| LEARNING_RATE   | 3x10^-4       | Adam optimizer step size                            |
+| DROPOUT_RATE    | 0.1           | Applied after every Conv & FC layer                 |
+
+```
+
+The model is compiled for regression: 
+`model.compile(loss="mse", optimizer=Adam(learning_rate=LEARNING_RATE), metrics=["mae", "mse"])`
+
+ ##### Callbacks
+
+ ```
+
+| Callback          | Monitored Value | Role                                        |
+|-------------------|------------------|--------------------------------------------|
+| ReduceLROnPlateau | val_mae          | Halve LR after 5 stagnant epochs           |
+| EarlyStopping     | val_mae          | Stop after 10 stagnant epochs              |
+| ModelCheckpoint   | val_mae          | Persist only the best model in every step  |
+
+ ```
+
+
+Consequently two artefacts are written to `network_model/`:
+
+`best_model.keras` – updated only when the current epoch beats the previous best on `val_mae`.
+
+`last_model.keras` – snapshot from the last epoch, even if it is worse. 
+
+#### Evaluation
+
+When training stops the script reloads `best_model.keras` and computes test-set Loss / MAE / MSE and pops up two plots
+- Training history: train vs. validation loss/MAE across epochs
+- Prediction vs. Ground-truth - sorted curve for visualising errors on the specific steering predictions
+
 ### Applying the trained neural network
 
+Once `best_model.keras` is saved in `network_model/` we can hand over the wheel to the CNN with the `joy_cnn_drive` actuator node.
+
+This node opens a window with the camera feed and reads our `best_model.keras` file by default. In the window we see the camera feed and two tiles of smaller pictures of the first two Conv-layer activation maps. There is a Start/Stop button in the bottom right corner, which toggles `constant_speed` between `0` and `0.2 m/s`. This can also controlled by pressing `s` button.
+
+The node sends `[x, y]` velocties as `Float32MultiArray` on `/joy_xy` every frame.
+
+#### Gazebo quick-start
+
+With the following command you can launch Gazebo with the TurtleBot3 on a track (default world: `track_with_road.sdf`) and RVIZ:
+
+```bash
+`ros2 launch KogRob-EtoE-NN-Driving simulation_bringup_track_follow.launch.py`
+```
 
 
+#### For a wired up CNN control 
+
+In a second terminal window run:
+
+```bash
+`ros2 launch KogRob-EtoE-NN-Driving joy_cnn_drive.launch.py`
+```
+
+This launch file starts `joy_cnn_drive`, `joy_xy_republisher` and `teleop_twist_joy` nodes, so the CNN can drive with the same config we used for manual driving.
+
+Click `RUN` and the robot should start - controlled by CNN.
