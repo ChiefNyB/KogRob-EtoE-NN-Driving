@@ -251,15 +251,18 @@ if LEARN_MODE == 'x':                      # only needed for x-training
     data   = data[keep_idx]
     labels = labels[keep_idx]
 
-    # --- optional left/right flip augmentation --------------------------
+# --- optional left/right flip augmentation --------------------------
 # duplicates the dataset and inverts the steering sign
-DO_FLIP = True           # set True to enable
+DO_FLIP = True           # set False to disable flipping
 if DO_FLIP:
-    flipped_imgs   = data[:, ::-1, :, :]                 # HWC, flip x-axis
+    flipped_imgs   = data[:, :, ::-1,  :]                 # HWC, flip x-axis
     flipped_labels = np.copy(labels)
     flipped_labels[:, 0] *= -1                          # invert steering
     data   = np.concatenate([data,   flipped_imgs],   axis=0)
     labels = np.concatenate([labels, flipped_labels], axis=0)
+
+    perm = np.random.permutation(len(data))
+    data, labels = data[perm], labels[perm]
 # --------------------------------------------------------------------
 
 # Adjust labels based on the learning mode
@@ -314,7 +317,7 @@ METRIC = 'val_mae'
 # Monitor 'val_loss' which is generally preferred over training loss
 lr_scheduler = ReduceLROnPlateau(monitor=METRIC, factor=0.5, patience=5, min_lr=1e-6, verbose=1)
 
-# Save the best model based on validation loss
+# Save the best model based on 'val_mae'
 checkpoint_filepath = os.path.join("..", "network_model", "best_model.keras")
 checkpoint = ModelCheckpoint(checkpoint_filepath, monitor=METRIC, save_best_only=True, verbose=1)
 

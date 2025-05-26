@@ -55,6 +55,7 @@ setup(
             "joy_xy_publisher = py_scripts.joy_xy_publisher:main",
             "joy_cnn_drive = py_scripts.joy_cnn_drive:main",
             "create_and_train_cnn = py_scripts.create_and_train_cnn:main",
+            "test_flip = py_scripts.test_flip:main",
         ],
     },
 )
