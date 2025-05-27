@@ -20,9 +20,12 @@ Dependencies (beyond ROS2 and Gazebo):
 - MOGI TurtleBot3 repositories
 - Python3
 - Some python packages:
-    - cv_bridge
-    - rclpy
-    - sensor_msgs
+    - TensorFlow (v2.18.0)
+    - NumPy (v1.26.4)
+    - imutils
+    - Scikit-learn
+    - Opencv-python
+    - Matplotlib
 - ROS2 joystick interface package
 
 You can add these with cloning the following repositories into the src folder of the workspace:
@@ -30,12 +33,6 @@ You can add these with cloning the following repositories into the src folder of
 ```bash
 git clone -b mogi-ros2 https://github.com/MOGI-ROS/turtlebot3
 git clone -b new_gazebo https://github.com/MOGI-ROS/turtlebot3_simulations
-```
-
-You should also set the environment variable for the TurtleBot3 Burger model:
-
-```bash
-export TURTLEBOT3_MODEL=burger
 ```
 
 And installing the packages below using apt:
@@ -67,6 +64,11 @@ Also don't forget to source the setup (workspace path may be different):
 
 ```bash
 source ~/ros2_project/install/setup.bash
+```
+You should also set the environment variable for the TurtleBot3 Burger model:
+
+```bash
+export TURTLEBOT3_MODEL=burger
 ```
 
 For GPU accelerated training process CUDA and cuDNN Library are required (optional).
@@ -199,7 +201,7 @@ The script first prints the TensorFlow/Keras version and checks for an available
 #### Data discovery
 
 The script is looking for labeled images in the above-mentioned `<package>/labelled_data`  folder and its subfolders in `.jpg` or `.png` format.
-(Names must embed joystick values, eg: `...x-0p40_y0p25.jpg`!)
+(Names must embed joystick values, e.g. `...X0p40_Y0p25.jpg`!)
 
 
 #### Image processing
