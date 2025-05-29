@@ -11,6 +11,11 @@ Created by:
 - Barnabás Nyuli
 
 
+The result of the project can be found in this video:
+
+<a href="https://youtu.be/c5XmolrfNCw"><img width="600" src="./assets/youtube.png"></a> 
+
+
 ## 1. Install and setup
 
 For use please install ROS2 Jazzy desktop version and Gazebo Harmonic.
@@ -289,4 +294,4 @@ In a second terminal window run:
 
 This launch file starts `joy_cnn_drive`, `joy_xy_republisher` and `teleop_twist_joy` nodes, so the CNN can drive with the same config we used for manual driving.
 
-Click `RUN` and the robot should start - controlled by CNN.
+Click `RUN` and the robot should start - controlled by the CNN.
